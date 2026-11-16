@@ -1,0 +1,18 @@
+.env
+.venv/
+uploads/
+submissions/
+__pycache__/
+forms/
+hr_tables/
+
+Data - Shortcut.lnk
+scratchpad/
+*.log
+
+# Personal ID documents and certificates used for local testing: never commit
+Data/Ankit/
+Data/Ayush/
+Data/Rohan mehta/
+Data/Tanmay/
+Data/intellipaat-certificate.pdf

@@ -1,0 +1,329 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 2060 1280" width="2060" height="1280" font-family="Segoe UI, Arial, Helvetica, sans-serif">
+  <title>HR Onboarding Portal - AWS architecture, data security and workflow</title>
+  <defs>
+    <style>
+      .ttl { font-size: 26px; font-weight: 700; fill: #232F3E; }
+      .sub { font-size: 13px; fill: #545B64; }
+      .bx  { font-size: 12px; font-weight: 700; }
+      .bt  { font-size: 12px; font-weight: 700; fill: #232F3E; }
+      .st  { font-size: 10.5px; fill: #414D5C; }
+      .tx  { font-size: 12px; fill: #232F3E; }
+      .tx2 { font-size: 11.5px; fill: #414D5C; }
+      .badge { font-size: 10px; font-weight: 700; fill: #232F3E; }
+      .num { font-size: 12px; font-weight: 700; fill: #fff; text-anchor: middle; }
+      .flow { stroke: #232F3E; stroke-width: 2; fill: none; marker-end: url(#arr); }
+      .dash { stroke: #DD344C; stroke-width: 2; fill: none; stroke-dasharray: 7 5; marker-end: url(#arrR); }
+      .thin { stroke: #232F3E; stroke-width: 1.5; fill: none; }
+    </style>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#232F3E"/></marker>
+    <marker id="arrR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#DD344C"/></marker>
+
+    <!-- AWS-style service tiles (category colours: networking purple, compute orange, storage green, database magenta, security red, management pink) -->
+    <symbol id="ico-user" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#232F3E"/><g stroke="#fff" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="28" cy="20" r="8"/><path d="M12 45 Q12 32 28 32 Q44 32 44 45"/></g></symbol>
+    <symbol id="ico-r53" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#8C4FFF"/><g stroke="#fff" fill="none" stroke-width="2.5"><circle cx="28" cy="28" r="17"/></g><text x="28" y="34" text-anchor="middle" font-family="Arial" font-weight="700" font-size="16" fill="#fff">53</text></symbol>
+    <symbol id="ico-cf" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#8C4FFF"/><g stroke="#fff" fill="none" stroke-width="2.5" stroke-linecap="round"><circle cx="28" cy="28" r="16"/><ellipse cx="28" cy="28" rx="7" ry="16"/><path d="M12 28 H44"/></g></symbol>
+    <symbol id="ico-alb" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#8C4FFF"/><g stroke="#fff" fill="none" stroke-width="2.5" stroke-linecap="round"><circle cx="14" cy="28" r="4"/><circle cx="42" cy="14" r="4"/><circle cx="42" cy="28" r="4"/><circle cx="42" cy="42" r="4"/><path d="M18 28 L38 28 M17 25 L38 15 M17 31 L38 41"/></g></symbol>
+    <symbol id="ico-nat" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#8C4FFF"/><g stroke="#fff" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="11" y="11" width="34" height="34" rx="4"/><path d="M19 28 H36 M31 22 L37 28 L31 34"/></g></symbol>
+    <symbol id="ico-vpce" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#8C4FFF"/><g stroke="#fff" fill="none" stroke-width="2.5" stroke-linecap="round"><circle cx="17" cy="28" r="6"/><circle cx="39" cy="28" r="6"/><path d="M23 28 H33"/></g></symbol>
+    <symbol id="ico-fargate" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#ED7100"/><g stroke="#fff" fill="none" stroke-width="2.5" stroke-linejoin="round"><rect x="11" y="12" width="34" height="32" rx="3"/><rect x="17" y="18" width="9" height="9"/><rect x="30" y="18" width="9" height="9"/><rect x="17" y="31" width="9" height="9"/><rect x="30" y="31" width="9" height="9"/></g></symbol>
+    <symbol id="ico-ecr" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#ED7100"/><g stroke="#fff" fill="none" stroke-width="2.5" stroke-linejoin="round"><rect x="11" y="11" width="34" height="10" rx="2"/><rect x="11" y="23" width="34" height="10" rx="2"/><rect x="11" y="35" width="34" height="10" rx="2"/></g></symbol>
+    <symbol id="ico-s3" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#7AA116"/><g stroke="#fff" fill="none" stroke-width="2.5" stroke-linejoin="round"><path d="M12 15 L16 44 Q28 49 40 44 L44 15"/><ellipse cx="28" cy="15" rx="16" ry="5"/></g></symbol>
+    <symbol id="ico-ddb" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#C925D1"/><g stroke="#fff" fill="none" stroke-width="2.5" stroke-linejoin="round"><ellipse cx="28" cy="15" rx="15" ry="5"/><path d="M13 15 V41 A15 5 0 0 0 43 41 V15"/><path d="M13 28 A15 5 0 0 0 43 28"/></g></symbol>
+    <symbol id="ico-kms" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#DD344C"/><g stroke="#fff" fill="none" stroke-width="2.5" stroke-linecap="round"><circle cx="19" cy="28" r="8"/><path d="M27 28 H46 M40 28 V35 M46 28 V34"/></g></symbol>
+    <symbol id="ico-sm" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#DD344C"/><g stroke="#fff" fill="none" stroke-width="2.5" stroke-linejoin="round"><rect x="10" y="17" width="36" height="22" rx="3"/></g><text x="28" y="39" text-anchor="middle" font-family="Arial" font-weight="700" font-size="20" fill="#fff">***</text></symbol>
+    <symbol id="ico-ses" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#E7157B"/><g stroke="#fff" fill="none" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"><rect x="10" y="16" width="36" height="25" rx="3"/><path d="M10 18 L28 32 L46 18"/></g></symbol>
+    <symbol id="ico-waf" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#DD344C"/><g stroke="#fff" fill="none" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"><path d="M28 9 L44 15 V28 C44 38 36 44 28 47 C20 44 12 38 12 28 V15 Z"/><path d="M13 24 H43 M15 34 H41 M28 24 V34 M21 34 V42 M35 34 V42"/></g></symbol>
+    <symbol id="ico-shield" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#DD344C"/><g stroke="#fff" fill="none" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"><path d="M28 9 L44 15 V28 C44 38 36 44 28 47 C20 44 12 38 12 28 V15 Z"/><path d="M20 28 L26 34 L37 22"/></g></symbol>
+    <symbol id="ico-acm" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#DD344C"/><g stroke="#fff" fill="none" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"><rect x="10" y="12" width="36" height="24" rx="2"/><path d="M16 20 H40 M16 27 H30"/><circle cx="37" cy="38" r="5"/><path d="M34 42 L33 49 L37 47 L41 49 L40 42"/></g></symbol>
+    <symbol id="ico-cognito" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#DD344C"/><g stroke="#fff" fill="none" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"><rect x="9" y="14" width="38" height="28" rx="3"/><circle cx="21" cy="26" r="4"/><path d="M14 38 Q14 32 21 32 Q28 32 28 38"/><path d="M33 24 H41 M33 31 H41"/></g></symbol>
+    <symbol id="ico-iam" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#DD344C"/><g stroke="#fff" fill="none" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"><circle cx="22" cy="19" r="7"/><path d="M9 44 Q9 31 22 31 Q30 31 33 35"/><rect x="33" y="36" width="13" height="10" rx="2"/><path d="M36 36 V32 A3.5 3.5 0 0 1 43 32 V36"/></g></symbol>
+    <symbol id="ico-guard" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#DD344C"/><g stroke="#fff" fill="none" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"><path d="M28 9 L44 15 V28 C44 38 36 44 28 47 C20 44 12 38 12 28 V15 Z"/><path d="M18 28 Q28 19 38 28 Q28 37 18 28 Z"/><circle cx="28" cy="28" r="2.5"/></g></symbol>
+    <symbol id="ico-macie" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#DD344C"/><g stroke="#fff" fill="none" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"><path d="M16 17 H40 L47 28 L28 47 L9 28 Z"/><path d="M9 28 H47 M22 17 L28 47 M34 17 L28 47"/></g></symbol>
+    <symbol id="ico-hub" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#DD344C"/><g stroke="#fff" fill="none" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"><path d="M28 9 L44 15 V28 C44 38 36 44 28 47 C20 44 12 38 12 28 V15 Z"/><circle cx="28" cy="22" r="2.5"/><circle cx="20" cy="33" r="2.5"/><circle cx="36" cy="33" r="2.5"/><path d="M28 24 L21 31 M28 24 L35 31 M22 33 H34"/></g></symbol>
+    <symbol id="ico-config" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#E7157B"/><g stroke="#fff" fill="none" stroke-linecap="butt"><circle cx="28" cy="28" r="16" stroke-width="6" stroke-dasharray="6 5.2"/><circle cx="28" cy="28" r="11" stroke-width="2.5"/><circle cx="28" cy="28" r="4" stroke-width="2.5"/></g></symbol>
+    <symbol id="ico-trail" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#E7157B"/><g stroke="#fff" fill="none" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"><path d="M32 10 H16 Q13 10 13 13 V43 Q13 46 16 46 H30"/><path d="M19 20 H32 M19 27 H28 M19 34 H26"/><circle cx="38" cy="33" r="7"/><path d="M43 38 L48 44"/></g></symbol>
+    <symbol id="ico-cw" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#E7157B"/><g stroke="#fff" fill="none" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"><circle cx="28" cy="28" r="17"/><path d="M16 34 L23 26 L29 31 L40 20"/></g></symbol>
+    <symbol id="ico-ext" viewBox="0 0 56 56"><rect width="56" height="56" rx="6" fill="#5F6368"/><text x="28" y="38" text-anchor="middle" font-family="Arial" font-weight="700" font-size="30" fill="#fff">G</text></symbol>
+  </defs>
+
+  <rect width="2060" height="1280" fill="#FFFFFF"/>
+
+  <!-- Title and legend -->
+  <text x="30" y="40" class="ttl">HR Onboarding Portal - AWS architecture, data security and workflow</text>
+  <text x="30" y="62" class="sub">Target deployment of the Employee portal (react_onboard.py) and HR portal (hr_info.py). The AI model stays on the Google Gemini API; storage moves from local JSON/files to DynamoDB and S3.</text>
+  <g transform="translate(1500,22)">
+    <path d="M0 10 H40" class="flow"/><text x="48" y="14" class="st">request / data flow</text>
+    <path d="M190 10 H230" class="dash"/><text x="238" y="14" class="st">egress to the internet</text>
+    <circle cx="395" cy="10" r="10" fill="#F58536"/><text x="395" y="14" class="num">n</text><text x="412" y="14" class="st">workflow step</text>
+  </g>
+
+  <!-- Actors -->
+  <use href="#ico-user" x="72" y="250" width="56" height="56"/>
+  <text x="100" y="324" text-anchor="middle" class="bt">Employee</text>
+  <text x="100" y="338" text-anchor="middle" class="st">React form in browser</text>
+  <text x="100" y="351" text-anchor="middle" class="st">Draft: sessionStorage</text>
+  <text x="100" y="364" text-anchor="middle" class="st">+ IndexedDB, browser only</text>
+  <use href="#ico-user" x="72" y="420" width="56" height="56"/>
+  <text x="100" y="494" text-anchor="middle" class="bt">HR reviewer</text>
+  <text x="100" y="508" text-anchor="middle" class="st">React HR page</text>
+
+  <!-- AWS Cloud / Region -->
+  <rect x="190" y="80" width="1630" height="860" rx="6" fill="none" stroke="#232F3E" stroke-width="2.5"/>
+  <text x="205" y="100" class="bx" fill="#232F3E">AWS Cloud</text>
+  <rect x="205" y="110" width="1600" height="815" rx="6" fill="#FAFCFF" stroke="#147EBA" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="220" y="127" class="bx" fill="#147EBA">Region: ap-south-1 (Mumbai) - data stays in India</text>
+
+  <!-- Edge and identity -->
+  <rect x="235" y="135" width="265" height="400" rx="6" fill="#F6F0FF" stroke="#8C4FFF" stroke-width="1.5"/>
+  <text x="247" y="153" class="bx" fill="#8C4FFF">Edge &amp; identity</text>
+
+  <use href="#ico-r53" x="250" y="165" width="56" height="56"/>
+  <text x="278" y="235" text-anchor="middle" class="bt">Route 53</text>
+  <text x="278" y="248" text-anchor="middle" class="st">DNS, alias records</text>
+  <use href="#ico-acm" x="370" y="165" width="56" height="56"/>
+  <text x="398" y="235" text-anchor="middle" class="bt">ACM</text>
+  <text x="398" y="248" text-anchor="middle" class="st">TLS certificates</text>
+
+  <use href="#ico-cf" x="250" y="290" width="56" height="56"/>
+  <text x="278" y="360" text-anchor="middle" class="bt">CloudFront</text>
+  <text x="278" y="373" text-anchor="middle" class="st">HTTPS only, TLS 1.2+</text>
+  <use href="#ico-waf" x="370" y="290" width="56" height="56"/>
+  <text x="398" y="360" text-anchor="middle" class="bt">AWS WAF</text>
+  <text x="398" y="373" text-anchor="middle" class="st">rate limit, OWASP rules</text>
+  <path d="M306 318 H370" class="thin"/>
+
+  <use href="#ico-cognito" x="250" y="415" width="56" height="56"/>
+  <text x="278" y="485" text-anchor="middle" class="bt">Cognito</text>
+  <text x="278" y="498" text-anchor="middle" class="st">HR login + MFA</text>
+  <text x="278" y="511" text-anchor="middle" class="st">(ALB OIDC auth)</text>
+  <use href="#ico-shield" x="370" y="415" width="56" height="56"/>
+  <text x="398" y="485" text-anchor="middle" class="bt">Shield</text>
+  <text x="398" y="498" text-anchor="middle" class="st">DDoS protection</text>
+
+  <!-- Actor to edge -->
+  <path d="M128 278 L248 318" class="flow"/>
+  <text x="140" y="270" class="badge">HTTPS</text>
+  <path d="M128 448 L248 443" class="flow"/>
+  <text x="140" y="440" class="badge">HTTPS</text>
+
+  <!-- VPC -->
+  <rect x="540" y="135" width="770" height="560" rx="6" fill="#F7FBF0" stroke="#7AA116" stroke-width="2"/>
+  <text x="555" y="153" class="bx" fill="#5E7F0E">VPC 10.0.0.0/16 (2 Availability Zones)</text>
+
+  <rect x="565" y="170" width="720" height="130" rx="4" fill="#EEF6DE" stroke="#7AA116" stroke-width="1.2"/>
+  <text x="577" y="187" class="bx" fill="#5E7F0E">Public subnets</text>
+  <use href="#ico-alb" x="600" y="205" width="56" height="56"/>
+  <text x="666" y="222" class="bt">Application Load Balancer</text>
+  <text x="666" y="238" class="st">HTTPS :443, TLS 1.2+, ACM certificate</text>
+  <text x="666" y="252" class="st">Accepts traffic from CloudFront only</text>
+  <text x="666" y="266" class="st">HR host rule: Cognito OIDC + MFA</text>
+  <use href="#ico-nat" x="1150" y="205" width="56" height="56"/>
+  <text x="1140" y="226" text-anchor="end" class="bt">NAT Gateway</text>
+  <text x="1140" y="240" text-anchor="end" class="st">outbound only</text>
+
+  <rect x="565" y="330" width="720" height="225" rx="4" fill="#EAF4FB" stroke="#147EBA" stroke-width="1.2"/>
+  <text x="577" y="548" class="bx" fill="#147EBA">Private subnets (no public IPs)</text>
+
+  <rect x="585" y="350" width="500" height="185" rx="4" fill="#FFF7EE" stroke="#ED7100" stroke-width="1.5"/>
+  <text x="910" y="367" class="bx" fill="#C25E00">ECS on Fargate, 2+ tasks</text>
+  <text x="910" y="381" class="st">auto scaling, multi-AZ</text>
+  <use href="#ico-fargate" x="610" y="378" width="56" height="56"/>
+  <text x="638" y="452" text-anchor="middle" class="bt">Employee Portal</text>
+  <text x="638" y="465" text-anchor="middle" class="st">react_onboard.py :8000</text>
+  <text x="638" y="478" text-anchor="middle" class="st">extract, validate, save</text>
+  <use href="#ico-fargate" x="840" y="378" width="56" height="56"/>
+  <text x="868" y="452" text-anchor="middle" class="bt">HR Portal</text>
+  <text x="868" y="465" text-anchor="middle" class="st">hr_info.py :8001</text>
+  <text x="868" y="478" text-anchor="middle" class="st">review, flag, approve / reject</text>
+  <text x="597" y="505" class="st">Task IAM role: least privilege per S3 prefix / table / secret</text>
+  <text x="597" y="520" class="st">Container images from ECR; logs to CloudWatch; app binds 0.0.0.0 behind the ALB</text>
+
+  <rect x="1105" y="380" width="165" height="155" rx="4" fill="#F4EEFF" stroke="#8C4FFF" stroke-width="1.5"/>
+  <use href="#ico-vpce" x="1118" y="392" width="48" height="48"/>
+  <text x="1174" y="410" class="bt">VPC endpoints</text>
+  <text x="1174" y="424" class="st">PrivateLink</text>
+  <text x="1117" y="458" class="st">Gateway: S3, DynamoDB</text>
+  <text x="1117" y="473" class="st">Interface: KMS, Secrets</text>
+  <text x="1117" y="488" class="st">Manager, CloudWatch, ECR</text>
+  <text x="1117" y="509" class="st">AWS traffic never leaves</text>
+  <text x="1117" y="523" class="st">the AWS network</text>
+
+  <rect x="565" y="570" width="720" height="110" rx="4" fill="#FFFFFF" stroke="#7AA116" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="577" y="587" class="bx" fill="#5E7F0E">Network controls</text>
+  <text x="577" y="604" class="st">ALB security group: 443 from the CloudFront managed prefix list only</text>
+  <text x="577" y="618" class="st">Task security group: 8000 / 8001 only from the ALB security group; no inbound from the internet</text>
+  <text x="577" y="632" class="st">Network ACLs per subnet tier; VPC Flow Logs go to CloudWatch</text>
+  <text x="577" y="646" class="st">HR portal on its own host (hr.example.com): MFA login plus an optional corporate IP allow-list</text>
+  <text x="577" y="660" class="st">Tasks reach the internet only through the NAT Gateway (Gemini API); no other egress</text>
+
+  <!-- Data and secrets -->
+  <rect x="1335" y="135" width="450" height="560" rx="6" fill="#FFF5FB" stroke="#E7157B" stroke-width="1.5"/>
+  <text x="1347" y="153" class="bx" fill="#C30F66">Data, keys &amp; secrets - all encrypted</text>
+
+  <use href="#ico-s3" x="1360" y="175" width="56" height="56"/>
+  <text x="1430" y="190" class="bt">Amazon S3 - uploads/&lt;employee-id&gt;/</text>
+  <text x="1430" y="205" class="st">Aadhaar, PAN, photo, resume, certificates, bank proofs</text>
+  <text x="1430" y="219" class="st">SSE-KMS, versioning, Block Public Access, TLS-only policy</text>
+  <text x="1430" y="233" class="st">Documents served by short-lived pre-signed URLs</text>
+
+  <use href="#ico-ddb" x="1360" y="263" width="56" height="56"/>
+  <text x="1430" y="278" class="bt">Amazon DynamoDB</text>
+  <text x="1430" y="293" class="st">Tables: submissions, forms, flags (replaces JSON files)</text>
+  <text x="1430" y="307" class="st">Private link token stored as a hash; status New to Approved</text>
+  <text x="1430" y="321" class="st">KMS encryption, point-in-time recovery, deletion protection</text>
+
+  <use href="#ico-kms" x="1360" y="351" width="56" height="56"/>
+  <text x="1430" y="366" class="bt">AWS KMS - customer-managed keys</text>
+  <text x="1430" y="381" class="st">Separate keys for S3, DynamoDB and secrets</text>
+  <text x="1430" y="395" class="st">Yearly rotation; key policy limits use to the task roles</text>
+
+  <use href="#ico-sm" x="1360" y="439" width="56" height="56"/>
+  <text x="1430" y="454" class="bt">AWS Secrets Manager</text>
+  <text x="1430" y="469" class="st">GEMINI_API_KEY (replaces the plain-text .env file)</text>
+  <text x="1430" y="483" class="st">Rotation reminders; readable only by the portal task role</text>
+
+  <use href="#ico-ses" x="1360" y="527" width="56" height="56"/>
+  <text x="1430" y="542" class="bt">Amazon SES</text>
+  <text x="1430" y="557" class="st">Emails the employee's private application link</text>
+  <text x="1430" y="571" class="st">DKIM / SPF / DMARC, TLS delivery, no document attached</text>
+
+  <use href="#ico-ecr" x="1360" y="615" width="56" height="56"/>
+  <text x="1430" y="630" class="bt">Amazon ECR</text>
+  <text x="1430" y="645" class="st">Portal container images, scan on push, immutable tags</text>
+  <text x="1430" y="659" class="st">Encrypted with KMS; pulled over the ECR VPC endpoints</text>
+
+  <!-- Connections inside AWS -->
+  <path d="M426 318 H515 V233 H598" class="flow"/>
+  <text x="440" y="311" class="badge">HTTPS</text>
+  <path d="M625 261 V378" class="flow"/>
+  <path d="M645 261 V315 H868 V378" class="flow"/>
+  <path d="M1085 458 H1105" class="flow"/>
+  <path d="M1270 440 H1333" class="flow"/>
+  <text x="1274" y="432" class="badge">TLS</text>
+  <path d="M1000 350 V338 H1178 V263" class="flow"/>
+  <path d="M1178 205 V98 H1905 V188" class="dash"/>
+  <rect x="1330" y="86" width="330" height="18" rx="3" fill="#fff" stroke="#DD344C"/>
+  <text x="1338" y="99" class="badge" fill="#DD344C">HTTPS 443 egress only, key sent in x-goog-api-key header</text>
+
+  <!-- External Google -->
+  <rect x="1835" y="190" width="205" height="215" rx="6" fill="#F5F5F5" stroke="#5F6368" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="1847" y="208" class="bx" fill="#3C4043">External: Google</text>
+  <use href="#ico-ext" x="1850" y="220" width="56" height="56"/>
+  <text x="1915" y="240" class="bt">Gemini API</text>
+  <text x="1915" y="255" class="st">AI model</text>
+  <text x="1847" y="298" class="st">Google Gemini API</text>
+  <text x="1847" y="313" class="st">temperature 0, JSON out</text>
+  <text x="1847" y="328" class="st">generativelanguage</text>
+  <text x="1847" y="342" class="st">.googleapis.com</text>
+  <text x="1847" y="364" class="st">Reads Aadhaar / PAN /</text>
+  <text x="1847" y="378" class="st">resume / bank images</text>
+  <text x="1847" y="392" class="st">to fill the form</text>
+  <rect x="1835" y="420" width="205" height="112" rx="6" fill="#FFF4F4" stroke="#DD344C" stroke-width="1.2"/>
+  <text x="1847" y="438" class="bx" fill="#DD344C">PII leaves AWS here</text>
+  <text x="1847" y="454" class="st">Document images go to Google.</text>
+  <text x="1847" y="468" class="st">Get employee consent, review</text>
+  <text x="1847" y="482" class="st">Google's data terms, and send</text>
+  <text x="1847" y="496" class="st">only what is needed. Option:</text>
+  <text x="1847" y="510" class="st">a vision model on Amazon</text>
+  <text x="1847" y="524" class="st">Bedrock keeps data in-region.</text>
+
+  <!-- Security and governance band -->
+  <rect x="235" y="715" width="1550" height="195" rx="6" fill="#FFF5FB" stroke="#E7157B" stroke-width="1.5"/>
+  <text x="247" y="733" class="bx" fill="#C30F66">Security monitoring &amp; governance - logs and findings from CloudFront, WAF, ALB, VPC, ECS, S3 and DynamoDB land here</text>
+
+  <use href="#ico-iam" x="270" y="745" width="56" height="56"/>
+  <text x="270" y="818" class="bt">IAM</text>
+  <text x="270" y="832" class="st">Least-privilege task roles,</text>
+  <text x="270" y="845" class="st">no long-lived keys in code,</text>
+  <text x="270" y="858" class="st">MFA for every admin</text>
+
+  <use href="#ico-trail" x="485" y="745" width="56" height="56"/>
+  <text x="485" y="818" class="bt">CloudTrail</text>
+  <text x="485" y="832" class="st">Audit of every API call,</text>
+  <text x="485" y="845" class="st">S3 data events on uploads,</text>
+  <text x="485" y="858" class="st">log-file integrity checks</text>
+
+  <use href="#ico-cw" x="700" y="745" width="56" height="56"/>
+  <text x="700" y="818" class="bt">CloudWatch</text>
+  <text x="700" y="832" class="st">App logs (no Aadhaar / PAN),</text>
+  <text x="700" y="845" class="st">metrics, alarms, Flow Logs,</text>
+  <text x="700" y="858" class="st">365-day retention</text>
+
+  <use href="#ico-guard" x="915" y="745" width="56" height="56"/>
+  <text x="915" y="818" class="bt">GuardDuty</text>
+  <text x="915" y="832" class="st">Threat detection on the</text>
+  <text x="915" y="845" class="st">account, ECS tasks and</text>
+  <text x="915" y="858" class="st">S3 access patterns</text>
+
+  <use href="#ico-macie" x="1130" y="745" width="56" height="56"/>
+  <text x="1130" y="818" class="bt">Macie</text>
+  <text x="1130" y="832" class="st">Finds PII (Aadhaar, PAN) in</text>
+  <text x="1130" y="845" class="st">S3 and alerts on public or</text>
+  <text x="1130" y="858" class="st">unexpected exposure</text>
+
+  <use href="#ico-hub" x="1345" y="745" width="56" height="56"/>
+  <text x="1345" y="818" class="bt">Security Hub</text>
+  <text x="1345" y="832" class="st">One view of all findings,</text>
+  <text x="1345" y="845" class="st">AWS best-practice and</text>
+  <text x="1345" y="858" class="st">CIS checks</text>
+
+  <use href="#ico-config" x="1560" y="745" width="56" height="56"/>
+  <text x="1560" y="818" class="bt">AWS Config</text>
+  <text x="1560" y="832" class="st">Tracks configuration, flags</text>
+  <text x="1560" y="845" class="st">unencrypted or public</text>
+  <text x="1560" y="858" class="st">buckets and open groups</text>
+
+  <!-- Workflow step markers -->
+  <g>
+    <circle cx="190" cy="298" r="11" fill="#F58536"/><text x="190" y="302" class="num">1</text>
+    <circle cx="625" cy="300" r="11" fill="#F58536"/><text x="625" y="304" class="num">2</text>
+    <circle cx="1360" cy="175" r="11" fill="#F58536"/><text x="1360" y="179" class="num">3</text>
+    <circle cx="1178" cy="305" r="11" fill="#F58536"/><text x="1178" y="309" class="num">4</text>
+    <circle cx="1360" cy="439" r="11" fill="#F58536"/><text x="1360" y="443" class="num">4</text>
+    <circle cx="1360" cy="263" r="11" fill="#F58536"/><text x="1360" y="267" class="num">5</text>
+    <circle cx="250" cy="415" r="11" fill="#F58536"/><text x="250" y="419" class="num">6</text>
+    <circle cx="840" cy="378" r="11" fill="#F58536"/><text x="840" y="382" class="num">7</text>
+    <circle cx="1360" cy="527" r="11" fill="#F58536"/><text x="1360" y="531" class="num">8</text>
+  </g>
+
+  <!-- Workflow panel -->
+  <rect x="30" y="960" width="990" height="300" rx="6" fill="#FFFFFF" stroke="#232F3E" stroke-width="1.5"/>
+  <text x="45" y="983" class="bx" fill="#232F3E" style="font-size:14px">Workflow</text>
+  <g class="tx">
+    <circle cx="55" cy="1005" r="10" fill="#F58536"/><text x="55" y="1009" class="num">1</text>
+    <text x="75" y="1009">Employee opens the portal: Route 53, then CloudFront with WAF (HTTPS only, rate limits, bot and OWASP rules); Shield absorbs DDoS.</text>
+    <circle cx="55" cy="1037" r="10" fill="#F58536"/><text x="55" y="1041" class="num">2</text>
+    <text x="75" y="1041">The ALB (ACM certificate, TLS 1.2+) forwards to the Employee Portal task on :8000 in a private subnet.</text>
+    <circle cx="55" cy="1069" r="10" fill="#F58536"/><text x="55" y="1073" class="num">3</text>
+    <text x="75" y="1073">Uploads (max 5 MB, real JPG/PDF checked by magic bytes) are written to S3 through the gateway endpoint, encrypted with KMS.</text>
+    <circle cx="55" cy="1101" r="10" fill="#F58536"/><text x="55" y="1105" class="num">4</text>
+    <text x="75" y="1105">Extract: the task reads the Gemini key from Secrets Manager, shrinks images to 1024 px and calls the AI model through the NAT Gateway.</text>
+    <circle cx="55" cy="1133" r="10" fill="#F58536"/><text x="55" y="1137" class="num">5</text>
+    <text x="75" y="1137">Submit: the server re-validates, creates the ID (IGTPLnnn) and private token, saves the record and form to DynamoDB, status New.</text>
+    <circle cx="55" cy="1165" r="10" fill="#F58536"/><text x="55" y="1169" class="num">6</text>
+    <text x="75" y="1169">HR opens hr.example.com: Cognito sign-in with MFA happens at the ALB before any request reaches the HR Portal.</text>
+    <circle cx="55" cy="1197" r="10" fill="#F58536"/><text x="55" y="1201" class="num">7</text>
+    <text x="75" y="1201">HR Portal (:8001) reads DynamoDB, opens documents by short-lived S3 pre-signed URL, flags items; Approve is blocked while flags are open.</text>
+    <circle cx="55" cy="1229" r="10" fill="#F58536"/><text x="55" y="1233" class="num">8</text>
+    <text x="75" y="1233">Send back: status Changes Requested, SES emails the private link; the employee fixes and resubmits (token checked), status New again.</text>
+  </g>
+
+  <!-- Data security panel -->
+  <rect x="1040" y="960" width="990" height="300" rx="6" fill="#FFFFFF" stroke="#DD344C" stroke-width="1.5"/>
+  <text x="1055" y="983" class="bx" fill="#DD344C" style="font-size:14px">Data security controls</text>
+  <g>
+    <text x="1055" y="1010" class="bt">In transit</text>
+    <text x="1055" y="1026" class="tx2">HTTPS everywhere: TLS 1.2+ on CloudFront and the ALB; AWS-internal calls use VPC endpoints; the Gemini call is HTTPS-only.</text>
+    <text x="1055" y="1056" class="bt">At rest</text>
+    <text x="1055" y="1072" class="tx2">S3, DynamoDB, Secrets Manager, ECR and logs use customer-managed KMS keys; S3 versioning, Block Public Access, DynamoDB PITR.</text>
+    <text x="1055" y="1102" class="bt">Access control</text>
+    <text x="1055" y="1118" class="tx2">Cognito + MFA for HR; employees use a 128-bit private token (hash stored); IAM roles scoped per table and S3 prefix; no keys in code.</text>
+    <text x="1055" y="1148" class="bt">PII protection</text>
+    <text x="1055" y="1164" class="tx2">Aadhaar / PAN images only in private S3 (no public URLs); Macie scans for PII; lifecycle retention; IDs scrubbed from application logs.</text>
+    <text x="1055" y="1194" class="bt">Detection &amp; audit</text>
+    <text x="1055" y="1210" class="tx2">CloudTrail (with S3 data events), GuardDuty, Security Hub, Config rules and CloudWatch alarms; logs kept in a locked log bucket.</text>
+    <text x="1055" y="1240" class="bt">Resilience</text>
+    <text x="1055" y="1255" class="tx2">Multi-AZ Fargate, S3 / DynamoDB durability, AWS Backup, WAF rate limiting. Replaces local JSON files and the plain-text .env.</text>
+  </g>
+</svg>

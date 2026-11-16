@@ -1,0 +1,101 @@
+education_id,employee_id,highest_qualification,specialization,institution,graduation_year,certifications
+EDU0001,EMP001,B.Tech,Computer Science,National Institute of Technology,2015,Cybersecurity Fundamentals
+EDU0002,EMP002,BBA,Data Science,Delhi Technical University,2018,Data Analytics Foundations
+EDU0003,EMP003,BBA,Computer Science,National Institute of Technology,2010,AWS Cloud Practitioner; Excel Essentials
+EDU0004,EMP004,BBA,Data Science,Delhi Technical University,2022,Cybersecurity Fundamentals
+EDU0005,EMP005,B.Tech,Human Resources,City College of Engineering,2011,AWS Cloud Practitioner; Excel Essentials
+EDU0006,EMP006,MCA,Information Technology,Open Learning University,2015,None
+EDU0007,EMP007,MCA,Human Resources,Delhi Technical University,2018,Cybersecurity Fundamentals
+EDU0008,EMP008,B.Sc,Information Technology,Institute of Business Studies,2024,Cybersecurity Fundamentals
+EDU0009,EMP009,M.Sc,Finance,National Institute of Technology,2022,Project Management Basics
+EDU0010,EMP010,M.Tech,Data Science,Institute of Business Studies,2022,Data Analytics Foundations
+EDU0011,EMP011,M.Tech,Marketing,State University of Technology,2011,Python; SQL Fundamentals
+EDU0012,EMP012,B.Sc,Computer Science,Open Learning University,2015,Project Management Basics
+EDU0013,EMP013,M.Tech,Human Resources,Institute of Business Studies,2009,Python; SQL Fundamentals
+EDU0014,EMP014,B.Sc,Finance,National Institute of Technology,2015,Cybersecurity Fundamentals
+EDU0015,EMP015,B.Sc,Marketing,National Institute of Technology,2015,Data Analytics Foundations
+EDU0016,EMP016,M.Sc,Data Science,City College of Engineering,2019,AWS Cloud Practitioner; Excel Essentials
+EDU0017,EMP017,BBA,Data Science,National Institute of Technology,2018,Python; SQL Fundamentals
+EDU0018,EMP018,B.E.,Data Science,Open Learning University,2025,None
+EDU0019,EMP019,B.Tech,Information Technology,National Institute of Technology,2020,AWS Cloud Practitioner; Excel Essentials
+EDU0020,EMP020,M.Sc,Marketing,Institute of Business Studies,2021,Project Management Basics
+EDU0021,EMP021,B.Sc,Data Science,City College of Engineering,2014,Project Management Basics
+EDU0022,EMP022,B.Com,Computer Science,State University of Technology,2011,Cybersecurity Fundamentals
+EDU0023,EMP023,MCA,Information Technology,Delhi Technical University,2018,AWS Cloud Practitioner; Excel Essentials
+EDU0024,EMP024,B.Sc,Computer Science,State University of Technology,2014,AWS Cloud Practitioner; Excel Essentials
+EDU0025,EMP025,MCA,Human Resources,City College of Engineering,2009,Cybersecurity Fundamentals
+EDU0026,EMP026,B.E.,Human Resources,Institute of Business Studies,2024,Project Management Basics
+EDU0027,EMP027,B.E.,Computer Science,State University of Technology,2020,Cybersecurity Fundamentals
+EDU0028,EMP028,B.Sc,Marketing,Institute of Business Studies,2012,Cybersecurity Fundamentals
+EDU0029,EMP029,MCA,Human Resources,State University of Technology,2025,None
+EDU0030,EMP030,B.Sc,Operations,City College of Engineering,2024,Data Analytics Foundations
+EDU0031,EMP031,BBA,Operations,City College of Engineering,2010,Cybersecurity Fundamentals
+EDU0032,EMP032,BBA,Information Technology,Institute of Business Studies,2019,Python; SQL Fundamentals
+EDU0033,EMP033,B.E.,Marketing,Open Learning University,2014,AWS Cloud Practitioner; Excel Essentials
+EDU0034,EMP034,M.Tech,Computer Science,Delhi Technical University,2009,AWS Cloud Practitioner; Excel Essentials
+EDU0035,EMP035,BBA,Information Technology,Open Learning University,2023,Project Management Basics
+EDU0036,EMP036,B.E.,Computer Science,Delhi Technical University,2019,Cybersecurity Fundamentals
+EDU0037,EMP037,B.Sc,Operations,National Institute of Technology,2022,Project Management Basics
+EDU0038,EMP038,MCA,Computer Science,State University of Technology,2009,None
+EDU0039,EMP039,M.Tech,Information Technology,Institute of Business Studies,2017,Python; SQL Fundamentals
+EDU0040,EMP040,M.Tech,Operations,Delhi Technical University,2012,Data Analytics Foundations
+EDU0041,EMP041,B.E.,Operations,State University of Technology,2016,AWS Cloud Practitioner; Excel Essentials
+EDU0042,EMP042,B.Tech,Data Science,Open Learning University,2017,Python; SQL Fundamentals
+EDU0043,EMP043,MBA,Operations,Open Learning University,2013,AWS Cloud Practitioner; Excel Essentials
+EDU0044,EMP044,MBA,Finance,Delhi Technical University,2025,Data Analytics Foundations
+EDU0045,EMP045,M.Tech,Finance,National Institute of Technology,2022,Project Management Basics
+EDU0046,EMP046,B.Tech,Computer Science,State University of Technology,2020,Python; SQL Fundamentals
+EDU0047,EMP047,B.E.,Data Science,City College of Engineering,2019,AWS Cloud Practitioner; Excel Essentials
+EDU0048,EMP048,BBA,Information Technology,Institute of Business Studies,2010,AWS Cloud Practitioner; Excel Essentials
+EDU0049,EMP049,MBA,Marketing,Delhi Technical University,2012,None
+EDU0050,EMP050,B.Tech,Human Resources,State University of Technology,2015,AWS Cloud Practitioner; Excel Essentials
+EDU0051,EMP051,BBA,Data Science,National Institute of Technology,2015,None
+EDU0052,EMP052,MCA,Marketing,State University of Technology,2013,None
+EDU0053,EMP053,B.Tech,Finance,City College of Engineering,2014,AWS Cloud Practitioner; Excel Essentials
+EDU0054,EMP054,M.Sc,Data Science,Delhi Technical University,2024,None
+EDU0055,EMP055,B.Com,Computer Science,Institute of Business Studies,2023,Cybersecurity Fundamentals
+EDU0056,EMP056,M.Tech,Marketing,National Institute of Technology,2022,Project Management Basics
+EDU0057,EMP057,M.Tech,Operations,National Institute of Technology,2014,Python; SQL Fundamentals
+EDU0058,EMP058,B.Com,Information Technology,City College of Engineering,2016,AWS Cloud Practitioner; Excel Essentials
+EDU0059,EMP059,M.Tech,Marketing,Delhi Technical University,2010,Python; SQL Fundamentals
+EDU0060,EMP060,BBA,Human Resources,Open Learning University,2024,Python; SQL Fundamentals
+EDU0061,EMP061,MBA,Operations,Open Learning University,2010,None
+EDU0062,EMP062,M.Sc,Operations,Institute of Business Studies,2019,Cybersecurity Fundamentals
+EDU0063,EMP063,BBA,Human Resources,Institute of Business Studies,2012,AWS Cloud Practitioner; Excel Essentials
+EDU0064,EMP064,BBA,Human Resources,City College of Engineering,2025,Data Analytics Foundations
+EDU0065,EMP065,MCA,Data Science,State University of Technology,2015,Cybersecurity Fundamentals
+EDU0066,EMP066,B.E.,Computer Science,Open Learning University,2023,Cybersecurity Fundamentals
+EDU0067,EMP067,B.Sc,Data Science,Delhi Technical University,2013,Data Analytics Foundations
+EDU0068,EMP068,M.Tech,Human Resources,Institute of Business Studies,2013,Python; SQL Fundamentals
+EDU0069,EMP069,MCA,Finance,Institute of Business Studies,2025,AWS Cloud Practitioner; Excel Essentials
+EDU0070,EMP070,B.Tech,Finance,Institute of Business Studies,2010,Cybersecurity Fundamentals
+EDU0071,EMP071,B.Sc,Information Technology,State University of Technology,2025,None
+EDU0072,EMP072,M.Sc,Operations,Institute of Business Studies,2024,Cybersecurity Fundamentals
+EDU0073,EMP073,M.Sc,Data Science,City College of Engineering,2016,Project Management Basics
+EDU0074,EMP074,BBA,Human Resources,State University of Technology,2020,Python; SQL Fundamentals
+EDU0075,EMP075,BBA,Marketing,City College of Engineering,2016,Cybersecurity Fundamentals
+EDU0076,EMP076,M.Sc,Information Technology,City College of Engineering,2012,Data Analytics Foundations
+EDU0077,EMP077,BBA,Human Resources,Institute of Business Studies,2009,Cybersecurity Fundamentals
+EDU0078,EMP078,B.Com,Data Science,National Institute of Technology,2013,None
+EDU0079,EMP079,M.Tech,Information Technology,Open Learning University,2014,Cybersecurity Fundamentals
+EDU0080,EMP080,M.Tech,Marketing,Delhi Technical University,2014,Cybersecurity Fundamentals
+EDU0081,EMP081,MCA,Information Technology,National Institute of Technology,2017,Project Management Basics
+EDU0082,EMP082,B.Sc,Human Resources,Delhi Technical University,2010,Data Analytics Foundations
+EDU0083,EMP083,BBA,Information Technology,Open Learning University,2018,Project Management Basics
+EDU0084,EMP084,M.Tech,Finance,Institute of Business Studies,2025,Cybersecurity Fundamentals
+EDU0085,EMP085,B.E.,Information Technology,City College of Engineering,2012,Data Analytics Foundations
+EDU0086,EMP086,BBA,Marketing,Open Learning University,2011,None
+EDU0087,EMP087,M.Sc,Marketing,Delhi Technical University,2024,None
+EDU0088,EMP088,M.Tech,Human Resources,Open Learning University,2025,Python; SQL Fundamentals
+EDU0089,EMP089,M.Sc,Information Technology,National Institute of Technology,2009,Cybersecurity Fundamentals
+EDU0090,EMP090,BBA,Marketing,Institute of Business Studies,2013,Data Analytics Foundations
+EDU0091,EMP091,MCA,Finance,National Institute of Technology,2010,AWS Cloud Practitioner; Excel Essentials
+EDU0092,EMP092,B.E.,Computer Science,Institute of Business Studies,2013,Project Management Basics
+EDU0093,EMP093,MCA,Finance,National Institute of Technology,2019,Data Analytics Foundations
+EDU0094,EMP094,M.Tech,Computer Science,National Institute of Technology,2022,None
+EDU0095,EMP095,B.E.,Finance,City College of Engineering,2008,Project Management Basics
+EDU0096,EMP096,BBA,Finance,National Institute of Technology,2014,Python; SQL Fundamentals
+EDU0097,EMP097,B.E.,Marketing,National Institute of Technology,2023,Project Management Basics
+EDU0098,EMP098,B.Tech,Information Technology,Institute of Business Studies,2018,Python; SQL Fundamentals
+EDU0099,EMP099,BBA,Operations,State University of Technology,2010,None
+EDU0100,EMP100,M.Tech,Data Science,City College of Engineering,2021,Cybersecurity Fundamentals

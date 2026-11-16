@@ -1,0 +1,46 @@
+# Run both portals on one machine:
+#   docker compose up --build
+#   onboarding portal  http://localhost:8000
+#   HR review portal   http://localhost:8001
+#
+# Default is local mode: data goes to the folders next to this file (submissions/, forms/,
+# uploads/, hr_tables/), so your existing records show up. To use MongoDB + S3 as on AWS
+# (see DEPLOY_AWS.md), put these in .env:
+#   STORAGE_BACKEND=mongo_s3  MONGODB_URI=...  S3_BUCKET=...  S3_PREFIX=onboarding/  AWS_REGION=...
+# and give the containers AWS credentials (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY).
+#
+# .env also supplies GEMINI_API_KEY and GEMMA_MODEL. Set HR_USER and HR_PASSWORD there to
+# put a login on the HR portal.
+
+x-common: &common
+  build: .
+  env_file: .env
+  environment: &common-env
+    STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+  volumes:
+    - ./submissions:/app/submissions
+    - ./forms:/app/forms
+    - ./uploads:/app/uploads
+    - ./hr_tables:/app/hr_tables
+  restart: unless-stopped
+
+services:
+  onboarding:
+    <<: *common
+    command: python react_onboard.py
+    ports:
+      - "8000:8000"
+    environment:
+      <<: *common-env
+      PORT: "8000"
+
+  hr:
+    <<: *common
+    command: python hr_info.py
+    ports:
+      - "8001:8001"
+    environment:
+      <<: *common-env
+      PORT: "8001"
+      # Where the "reopen your application" link points; use the public address when deployed
+      ONBOARDING_URL: ${ONBOARDING_URL:-http://localhost:8000}
