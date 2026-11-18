@@ -1,8 +1,7 @@
-starlette
+﻿starlette
 uvicorn
 python-multipart
 pillow
 pypdfium2
 boto3
 pyarrow
-pymongo

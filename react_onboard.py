@@ -39,9 +39,12 @@ from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Route
 
 import Bank_details as bank
+import assets
+import jsonlog
 import policies
 import theme
 import storage
+from security_headers import SecurityHeaders
 
 
 # ==========================================================
@@ -50,6 +53,7 @@ import storage
 
 BASE_DIR = Path(__file__).resolve().parent
 
+jsonlog.setup()  # JSON log lines with the level and the employee ID only, never personal details
 log = logging.getLogger("onboarding")
 # Records, the form as submitted (so an employee can reopen it when HR flags something) and
 # uploaded documents live in storage.py: local folders, or S3 with STORAGE_BACKEND=s3
@@ -92,6 +96,13 @@ MAX_RESUME_CHARS = 8000
 FILE_SIGNATURES = {"jpg": b"\xff\xd8\xff", "pdf": b"%PDF-"}
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+
+# Every document key -> (label, file type), including the bank step's
+ALL_DOCUMENTS = {**DOCUMENTS, **OPTIONAL_DOCUMENTS, **bank.DOCUMENTS}
+
+# A Lambda function takes at most 6 MB per request, so a document read by the AI model is sent on
+# its own and refused above this (the page shrinks photos first); the real upload goes to S3.
+MAX_EXTRACT_REQUEST_BYTES = 5_500_000
 
 # Employee IDs run IGTPL001, IGTPL002, ... (more digits once past 999)
 EMPLOYEE_ID_PREFIX = "IGTPL"
@@ -803,7 +814,8 @@ def validate(data, family, education, documents):
         return "Please upload: " + ", ".join(missing_documents)
 
     for key, content in documents.items():
-        error = validate_document(key, content)
+        # True: the file went straight to S3 and was already checked there (verify_uploads)
+        error = None if content is True else validate_document(key, content)
         if error:
             return error
 
@@ -1002,12 +1014,18 @@ def uploaded(form, name):
     return file if hasattr(file, "read") and file.filename else None
 
 
-async def index(request: Request):
+def render_page():
+    """The assembled page, with the deployment-dependent __DIRECT_UPLOAD__ still a name (see assets.py)."""
+
     labels = {key: label for label, key in REQUIRED_FIELDS.items()}
     page = bank.inject(
         PAGE.replace("__LANGUAGES__", json.dumps(LANGUAGES)).replace("__FIELD_LABELS__", json.dumps(labels))
     )
-    return HTMLResponse(theme.inject(policies.inject(page, json.dumps(policies.PAYLOAD))))
+    return theme.inject(policies.inject(page, json.dumps(policies.PAYLOAD)))
+
+
+async def index(request: Request):
+    return ASSETS.page("index")
 
 
 async def health(request: Request):
@@ -1015,7 +1033,27 @@ async def health(request: Request):
     return JSONResponse({"ok": True})
 
 
+def too_large(request):
+    """A 413 reply when a request is bigger than one Lambda invocation takes, else None."""
+
+    try:
+        size = int(request.headers.get("content-length") or 0)
+    except ValueError:
+        size = 0
+
+    if size > MAX_EXTRACT_REQUEST_BYTES:
+        return JSONResponse(
+            {"error": "These files are too large to read together. Try smaller photos, or fill the details by hand."},
+            status_code=413,
+        )
+
+    return None
+
+
 async def extract_bank(request: Request):
+
+    if (refused := too_large(request)):
+        return refused
 
     form = await request.form()
     keys = {"bank_proof": ("Bank Proof", "jpg"), "payslip": ("Payslip", "pdf"),
@@ -1053,6 +1091,9 @@ async def extract_bank(request: Request):
 
 async def extract(request: Request):
 
+    if (refused := too_large(request)):
+        return refused
+
     form = await request.form()
     keys = ("pan", "aadhaar_front", "aadhaar_back")
     files = [uploaded(form, key) for key in keys]
@@ -1084,6 +1125,9 @@ async def extract(request: Request):
 
 async def extract_education(request: Request):
 
+    if (refused := too_large(request)):
+        return refused
+
     form = await request.form()
     file = uploaded(form, "education_certificate")
 
@@ -1112,6 +1156,9 @@ async def extract_education(request: Request):
 
 
 async def extract_resume(request: Request):
+
+    if (refused := too_large(request)):
+        return refused
 
     form = await request.form()
     file = uploaded(form, "resume")
@@ -1177,18 +1224,44 @@ async def submit(request: Request):
         data.get("education"), EDUCATION_COLUMNS, ignore=("Qualification",)
     )
 
-    documents = {}
-    for key in DOCUMENTS:
-        file = uploaded(form, key)
-        documents[key] = await file.read() if file else None
+    store = storage.get_store()
 
-    optional_documents = {}
-    for key in OPTIONAL_DOCUMENTS:
-        file = uploaded(form, key)
-        if file:
-            optional_documents[key] = await file.read()
+    # Direct mode (AWS): the browser already put the files in S3 (see upload_urls); only their
+    # names arrive here, and each is checked in S3 below before the application is accepted
+    direct = bool(getattr(store, "direct_upload", False)) and form.get("direct") == "1"
+    sent_keys = []
+    upload_id = form.get("upload_id")
 
-    bank_files, payslip_count = await bank.read_uploads(form, uploaded)
+    if direct:
+        # The files wait under pending/<upload id>/ (see upload_urls); the employee ID does not exist
+        # yet. It is claimed below, after the form and the files have been checked.
+        if not storage.UPLOAD_ID.fullmatch(upload_id or ""):
+            return JSONResponse({"error": "This application could not be matched to its uploads. Please start again."}, status_code=400)
+
+        if existing:
+            jsonlog.set_employee(existing["employee_id"])
+
+        try:
+            listed = json.loads(form.get("uploaded") or "[]")
+        except json.JSONDecodeError:
+            listed = []
+        sent_keys = [key for key in ALL_DOCUMENTS if key in listed] if isinstance(listed, list) else []
+
+        documents = {key: True for key in DOCUMENTS if key in sent_keys}
+        optional_documents, bank_files, payslip_count = {}, {}, 0
+    else:
+        documents = {}
+        for key in DOCUMENTS:
+            file = uploaded(form, key)
+            documents[key] = await file.read() if file else None
+
+        optional_documents = {}
+        for key in OPTIONAL_DOCUMENTS:
+            file = uploaded(form, key)
+            if file:
+                optional_documents[key] = await file.read()
+
+        bank_files, payslip_count = await bank.read_uploads(form, uploaded)
 
     error = (
         validate(data, family, education, documents)
@@ -1201,6 +1274,9 @@ async def submit(request: Request):
         or bank.validate_uploads(bank_files, payslip_count, check_file)
     )
 
+    if not error and direct:
+        error = verify_uploads(store, upload_id, sent_keys)
+
     if error:
         return JSONResponse({"error": error}, status_code=400)
 
@@ -1211,6 +1287,7 @@ async def submit(request: Request):
 
     data["languages"] = ", ".join(normalise_languages(data["languages"])[0])
 
+    # A new application claims its ID here, only now that everything has been checked
     record = build_record(data, family, education, existing["employee_id"] if existing else None)
 
     now = datetime.datetime.now().isoformat()
@@ -1231,34 +1308,106 @@ async def submit(request: Request):
         record["flags"] = []
 
     # Keep the uploaded documents, in this employee's own folder, so HR can review them in hr_info.py
-    store = storage.get_store()
     employee_id = record["employee_id"]
+    jsonlog.set_employee(employee_id)
 
     record["documents"] = {}
 
-    for key, (_, file_type) in DOCUMENTS.items():
-        filename = f"{key}.{file_type}"
-        store.put_document(employee_id, filename, documents[key])
-        record["documents"][key] = filename
+    if direct:
+        record["documents"] = {key: f"{key}.{ALL_DOCUMENTS[key][1]}" for key in sent_keys}
 
-    for key, content in optional_documents.items():
-        filename = f"{key}.{OPTIONAL_DOCUMENTS[key][1]}"
-        store.put_document(employee_id, filename, content)
-        record["documents"][key] = filename
+        try:
+            for filename in record["documents"].values():
+                store.promote_upload(upload_id, employee_id, filename)
+        except Exception:
+            # Nothing is shown to HR yet; the files are still pending, so pressing Submit again works
+            log.exception("Moving the uploaded documents failed")
+            return JSONResponse(
+                {"error": "Your documents could not be saved. Please press Submit again."}, status_code=500
+            )
+    else:
+        for key, (_, file_type) in DOCUMENTS.items():
+            filename = f"{key}.{file_type}"
+            store.put_document(employee_id, filename, documents[key])
+            record["documents"][key] = filename
 
-    record["documents"].update(bank.save_uploads(bank_files, lambda name, content: store.put_document(employee_id, name, content)))
+        for key, content in optional_documents.items():
+            filename = f"{key}.{OPTIONAL_DOCUMENTS[key][1]}"
+            store.put_document(employee_id, filename, content)
+            record["documents"][key] = filename
+
+        record["documents"].update(bank.save_uploads(bank_files, lambda name, content: store.put_document(employee_id, name, content)))
+
     record["bank_details"] = bank.build_bank_record(data)
     record["document_folder"] = store.folder(employee_id)
 
-    # A document the employee removed while fixing the application is not kept
-    for stored in store.list_documents(employee_id):
-        if stored not in record["documents"].values():
-            store.delete_document(employee_id, stored)
+    # A document the employee removed while fixing the application is not kept. In direct mode
+    # the portal's role cannot delete anything, so an old file stays in S3, unused (see the guide).
+    if not direct:
+        for stored in store.list_documents(employee_id):
+            if stored not in record["documents"].values():
+                store.delete_document(employee_id, stored)
 
     store.put_json("form", employee_id, snapshot)
     storage.save_record(record)
+    log.info("Application submitted")
 
     return JSONResponse(record)
+
+
+def verify_uploads(store, upload_id, keys):
+    """After a direct upload: an error message if a pending file is missing, empty, too big or the wrong type, else None."""
+
+    for key in keys:
+        label, file_type = ALL_DOCUMENTS[key]
+        reason = store.check_upload(upload_id, f"{key}.{file_type}", FILE_SIGNATURES[file_type], MAX_UPLOAD_BYTES)
+
+        if reason == "too_large":
+            return f"{label} is larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB."
+        if reason == "wrong_type":
+            return f"{label} must be " + ("a PDF file." if file_type == "pdf" else "a JPG/JPEG image.")
+        if reason:
+            return f"{label} was not received. Please upload it again."
+
+    return None
+
+
+async def upload_urls(request: Request):
+    """Pre-signed upload forms, one per file, so the browser sends each file straight to S3.
+
+    The files go to pending/<upload id>/<name>, where the upload id is a random uuid: **no employee ID
+    is claimed here**, so a form that is started and abandoned uses up no number. The submit checks
+    the files, claims the ID and copies them into the employee's own folder. Asking again with the
+    same upload id (a retry, or links that expired) returns fresh forms for the same place.
+    """
+
+    store = storage.get_store()
+
+    if not getattr(store, "direct_upload", False):
+        return JSONResponse({"error": "Direct upload is not enabled."}, status_code=404)
+
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        body = None
+
+    keys = body.get("keys") if isinstance(body, dict) else None
+
+    if not isinstance(keys, list) or not keys or not all(key in ALL_DOCUMENTS for key in keys) or len(set(keys)) != len(keys):
+        return JSONResponse({"error": "Invalid list of documents."}, status_code=400)
+
+    upload_id = body.get("upload_id") or storage.new_upload_id()
+
+    if not isinstance(upload_id, str) or not storage.UPLOAD_ID.fullmatch(upload_id):
+        return JSONResponse({"error": "Invalid upload id."}, status_code=400)
+
+    uploads = {
+        key: {"filename": f"{key}.{ALL_DOCUMENTS[key][1]}",
+              **store.presign_upload(upload_id, f"{key}.{ALL_DOCUMENTS[key][1]}", MAX_UPLOAD_BYTES)}
+        for key in keys
+    }
+
+    return JSONResponse({"upload_id": upload_id, "uploads": uploads})
 
 
 def load_application(employee_id, token):
@@ -2155,6 +2304,9 @@ const LANGUAGES = __LANGUAGES__;
 // Form key -> the field name shown in error messages (from REQUIRED_FIELDS on the server)
 const FIELD_LABELS = __FIELD_LABELS__;
 
+// true on AWS: each file goes from the browser straight to S3 (a pre-signed POST) and only its name is submitted
+const DIRECT_UPLOAD = __DIRECT_UPLOAD__;
+
 // Phone fields; each has a "<key>_code" dial code in the form
 const PHONE_KEYS = ["mobile", "emergency_phone", "ref1_contact", "ref2_contact"];
 
@@ -2494,10 +2646,80 @@ function calculateAge(dob) {
   return Math.max(0, Math.min(age, 100));
 }
 
-async function postForm(url, body) {
+// Behind CloudFront's origin access control a POST must carry the SHA-256 of its body in
+// x-amz-content-sha256, or the request is refused (403). A form is turned into bytes first so the
+// bytes that are hashed are the bytes that are sent.
+async function signedFetch(url, { method, body, headers = {} }) {
+  if (body instanceof FormData) {
+    const request = new Request(url, { method, body });
+    headers = { ...headers, "Content-Type": request.headers.get("Content-Type") };
+    body = await request.arrayBuffer();
+  }
+  if (body != null && window.crypto && crypto.subtle) {
+    const bytes = typeof body === "string" ? new TextEncoder().encode(body) : body;
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    const hex = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    headers = { ...headers, "x-amz-content-sha256": hex };
+  }
+  return fetch(url, { method, body, headers });
+}
+
+async function postJson(url, payload) {
+  let response;
+  try {
+    response = await signedFetch(url, { method: "POST", body: JSON.stringify(payload), headers: { "Content-Type": "application/json" } });
+  } catch {
+    throw new Error("Could not reach the server. Please check your connection and try again.");
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || `Request failed (${response.status}).`);
+  return data;
+}
+
+// One document from the browser to S3 with the pre-signed form the server made for it
+async function uploadToS3({ url, fields }, file) {
+  const body = new FormData();
+  Object.entries(fields).forEach(([name, value]) => body.append(name, value));
+  body.append("file", file);
   let response;
   try {
     response = await fetch(url, { method: "POST", body });
+  } catch {
+    throw new Error("Could not upload a document. Please check your connection and try again.");
+  }
+  if (response.status === 403) throw new Error("The upload link expired. Please press Submit again.");
+  if (!response.ok) throw new Error("A document could not be uploaded: it may be too large or not the right type.");
+}
+
+// [key, File] for every document picked; payslips are saved as payslip_1 ... payslip_6
+function documentEntries(files) {
+  return Object.entries(files).flatMap(([key, file]) =>
+    Array.isArray(file)
+      ? file.slice(0, PAYSLIP_COUNT).map((item, index) => [`payslip_${index + 1}`, item])
+      : file ? [[key, file]] : []);
+}
+
+// A phone photo can be several MB; a Lambda request takes 6 MB at most. The AI model needs far less.
+async function shrinkForReading(file) {
+  if (!file || !file.type.startsWith("image/") || file.size < 1000000) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
+    return blob && blob.size < file.size ? new File([blob], file.name, { type: "image/jpeg" }) : file;
+  } catch {
+    return file;
+  }
+}
+
+async function postForm(url, body) {
+  let response;
+  try {
+    response = await signedFetch(url, { method: "POST", body });
   } catch {
     throw new Error("Could not reach the server. Is react_onboard.py still running?");
   }
@@ -2539,6 +2761,26 @@ function useActiveSection(ids) {
   return active;
 }
 
+// A picture that is not a JPEG (PNG, WebP, and HEIC where the browser can show it) as a JPEG File, or null.
+// iPhone HEIC: the photo picker on an iPhone already hands over a JPEG when the page asks for JPEG (the
+// accept list below leaves HEIC out on purpose), and Safari can decode a HEIC file itself. Other browsers
+// cannot decode HEIC and no converter is shipped (it would need 'unsafe-eval' in the Content-Security-Policy),
+// so there the employee is asked to choose a JPG.
+async function convertToJpeg(file) {
+  if (!file.type.startsWith("image/") && !/\.(png|webp|heic|heif)$/i.test(file.name)) return null;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    canvas.getContext("2d").drawImage(bitmap, 0, 0);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
+    return blob ? new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" }) : null;
+  } catch {
+    return null;
+  }
+}
+
 // Click-to-browse plus drag-and-drop, with type and size checks
 function useFilePicker(kind, onChange) {
   const inputRef = useRef(null);
@@ -2546,8 +2788,14 @@ function useFilePicker(kind, onChange) {
   const [error, setError] = useState(null);
   const rules = FILE_KINDS[kind];
 
-  const accept = (file) => {
+  const accept = async (file) => {
     if (!file) return;
+    if (kind === "image" && !rules.test(file)) {
+      // A photo in another format (PNG, WebP, or HEIC on a browser that can show it) becomes a JPEG here, before anything is uploaded
+      const converted = await convertToJpeg(file);
+      if (!converted) { setError(`${rules.error} This photo could not be converted, please choose a JPG (on an iPhone, pick the photo from the photo library).`); return; }
+      file = converted;
+    }
     if (!rules.test(file)) { setError(rules.error); return; }
     if (file.size > MAX_UPLOAD_MB * 1024 * 1024) { setError(`File is larger than ${MAX_UPLOAD_MB} MB.`); return; }
     setError(null);
@@ -2573,7 +2821,7 @@ function useFilePicker(kind, onChange) {
         ref={inputRef}
         type="file"
         hidden
-        accept={rules.accept}
+        accept={kind === "image" ? `${rules.accept},.png,.webp,image/png,image/webp` : rules.accept}
         onChange={(event) => { accept(event.target.files[0]); event.target.value = ""; }}
       />
     ),
@@ -3885,6 +4133,7 @@ function App() {
   const [step, setStep] = useState(draft ? draft.step : 0);
   const [stepError, setStepError] = useState(null);
   const firstRender = useRef(true);
+  const draftRef = useRef(null);  // the upload id of the files waiting in S3 (see submit)
 
   // After a refresh, bring back the uploaded files of the other steps. A brand-new visit
   // has no draft, so any files left by an earlier session are removed.
@@ -4103,7 +4352,9 @@ function App() {
     const request = ++resumeRequest.current;
 
     const identityBody = new FormData();
-    if (readIdentity) ["aadhaar_front", "aadhaar_back", "pan"].forEach((key) => identityBody.append(key, files[key]));
+    if (readIdentity) {
+      for (const key of ["aadhaar_front", "aadhaar_back", "pan"]) identityBody.append(key, await shrinkForReading(files[key]));
+    }
     const resumeBody = new FormData();
     if (readResume) resumeBody.append("resume", files.resume);
 
@@ -4178,12 +4429,29 @@ function App() {
       body.append("employee_id", EDIT_LINK.id);
       body.append("token", EDIT_LINK.token);
     }
-    Object.entries(files).forEach(([key, file]) => {
-      if (Array.isArray(file)) file.forEach((item) => body.append(key, item));
-      else if (file) body.append(key, file);
-    });
+    if (!DIRECT_UPLOAD) {
+      Object.entries(files).forEach(([key, file]) => {
+        if (Array.isArray(file)) file.forEach((item) => body.append(key, item));
+        else if (file) body.append(key, file);
+      });
+    }
     try {
+      if (DIRECT_UPLOAD) {
+        // ask for one pre-signed upload per file; send each file straight to S3; submit only the names
+        const entries = documentEntries(files);
+        const session = await postJson("/api/upload-urls", {
+          keys: entries.map(([key]) => key),
+          ...(draftRef.current ? { upload_id: draftRef.current } : {}),
+        });
+        // Kept for a retry: the same waiting place, and no employee ID is used until the submit succeeds
+        draftRef.current = session.upload_id;
+        await Promise.all(entries.map(([key, file]) => uploadToS3(session.uploads[key], file)));
+        body.append("direct", "1");
+        body.append("uploaded", JSON.stringify(entries.map(([key]) => key)));
+        body.append("upload_id", session.upload_id);
+      }
       setRecord(await postForm("/api/submit", body));
+      draftRef.current = null;
       clearDraft();
     } catch (error) {
       setSubmitError(error.message);
@@ -4641,8 +4909,13 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 # 7. SERVER
 # ==========================================================
 
+# The page's CSS and JavaScript are files of our own (compiled once, see assets.py): no inline code, no CDN
+ASSETS = assets.AssetSet("onboard", {"index": render_page})
+ASSETS.tokens = lambda: {"__DIRECT_UPLOAD__": "true" if getattr(storage.get_store(), "direct_upload", False) else "false"}
+
 app = Starlette(
     routes=[
+        *ASSETS.routes(),
         Route("/", index),
         Route("/health", health),
         Route("/api/extract", extract, methods=["POST"]),
@@ -4651,13 +4924,15 @@ app = Starlette(
         Route("/api/extract-resume", extract_resume, methods=["POST"]),
         Route("/api/application/{employee_id}", application),
         Route("/api/application/{employee_id}/documents/{document}", application_document),
+        Route("/api/upload-urls", upload_urls, methods=["POST"]),
         Route("/api/submit", submit, methods=["POST"]),
     ],
     # The page is a few hundred KB of HTML/JSX; gzip cuts the transfer several-fold
-    middleware=[Middleware(GZipMiddleware, minimum_size=1024)],
+    middleware=[Middleware(SecurityHeaders, portal="onboarding"), Middleware(GZipMiddleware, minimum_size=1024)],
 )
 
 
 if __name__ == "__main__":
     print(f"Employee Onboarding Portal running at http://localhost:{PORT}")
-    uvicorn.run(app, host=HOST, port=PORT)
+    # access_log off: the employee's edit link carries a secret token in the URL
+    uvicorn.run(app, host=HOST, port=PORT, access_log=False)

@@ -5,7 +5,8 @@ Rebuild the HR tables from the saved records.
     python sync_tables.py --from-local     first copy submissions/, forms/ and uploads/ from this
                                            machine into the configured storage (e.g. S3), then rebuild
 
-Use --from-local once when moving to AWS (STORAGE_BACKEND=s3, S3_BUCKET=...). Safe to repeat.
+Use --from-local once when moving to AWS (STORAGE_BACKEND=dynamodb_s3, S3_BUCKET=...). Safe to repeat:
+with DynamoDB a record that is already there is kept as it is, never overwritten.
 """
 
 import sys
@@ -22,10 +23,20 @@ def copy_local_into(target):
             target.put_document(employee_id, filename, source.get_document(employee_id, filename))
 
         form = source.get_json("form", employee_id)
+        record = source.get_json("submission", employee_id)
+
+        if hasattr(target, "import_json"):
+            # DynamoDB: create-only, so a record that is already there is never overwritten
+            added = target.import_json("submission", employee_id, record)
+            if form is not None:
+                target.import_json("form", employee_id, form)
+            print(f"copied {employee_id}" if added else f"kept {employee_id} (already in the database)")
+            continue
+
         if form is not None:
             target.put_json("form", employee_id, form)
 
-        target.put_json("submission", employee_id, source.get_json("submission", employee_id))
+        target.put_json("submission", employee_id, record)
         print(f"copied {employee_id}")
 
 
@@ -34,7 +45,7 @@ def main():
 
     if "--from-local" in sys.argv:
         if isinstance(target, storage.LocalStore):
-            sys.exit("--from-local needs STORAGE_BACKEND=s3 (the target is the local folders).")
+            sys.exit("--from-local needs STORAGE_BACKEND=dynamodb_s3 (the target is the local folders).")
         copy_local_into(target)
 
     for employee_id in sorted(target.list_ids()):

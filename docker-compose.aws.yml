@@ -1,0 +1,78 @@
+﻿# OPTION B ONLY (one EC2 server). The recommended deployment is serverless (Lambda + DynamoDB + S3), see AWS_SETUP_GUIDE.md.
+# This file still assumes the older MongoDB settings: use STORAGE_BACKEND=dynamodb_s3 and the DDB_* settings (guide, Appendix C).
+# Low-cost AWS deployment: both portals and an HTTPS front door on ONE small EC2 instance.
+# See DEPLOY_AWS.md. Run from the project folder, with a .env next to this file:
+#   docker compose -f docker-compose.aws.yml up -d --build
+#
+# The portals are not published to the internet: only Caddy (ports 80/443) is. Caddy gets and
+# renews the HTTPS certificates by itself. Nothing is kept on the container's disk
+# (STORAGE_BACKEND=mongo_s3: records in MongoDB, documents and tables in S3), except Caddy's
+# certificates, which live in the caddy_data volume.
+#
+# .env must hold (see DEPLOY_AWS.md, section 8): ONBOARD_DOMAIN, HR_DOMAIN, ONBOARDING_URL,
+# STORAGE_BACKEND, AWS_REGION, S3_*, MONGODB_*, GEMINI_API_KEY, GEMMA_MODEL, HR_USER, HR_PASSWORD
+
+x-common: &common
+  build: .
+  env_file: .env
+  restart: unless-stopped
+
+# Container output goes to the CloudWatch log groups made in Step 6 of AWS_SETUP_GUIDE.md (the same
+# groups, retention and ERROR alarm an ECS deployment would use). Needs AWS_REGION in .env and the
+# logs permissions in the instance role (DEPLOY_AWS.md, 5.2).
+x-logging: &logging
+  driver: awslogs
+
+services:
+  onboarding:
+    <<: *common
+    command: python react_onboard.py
+    environment:
+      PORT: "8000"
+    expose:
+      - "8000"
+    mem_limit: 900m
+    logging:
+      <<: *logging
+      options:
+        awslogs-region: ${AWS_REGION}
+        awslogs-group: /ecs/hr-onboarding-portal
+        awslogs-stream: onboarding-${LOG_STREAM_PREFIX:-hr-instance}
+
+  hr:
+    <<: *common
+    command: python hr_info.py
+    environment:
+      PORT: "8001"
+    expose:
+      - "8001"
+    mem_limit: 500m
+    logging:
+      <<: *logging
+      options:
+        awslogs-region: ${AWS_REGION}
+        awslogs-group: /ecs/hr-onboarding-hr
+        awslogs-stream: hr-${LOG_STREAM_PREFIX:-hr-instance}
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      ONBOARD_DOMAIN: ${ONBOARD_DOMAIN}
+      HR_DOMAIN: ${HR_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      - onboarding
+      - hr
+
+volumes:
+  caddy_data:

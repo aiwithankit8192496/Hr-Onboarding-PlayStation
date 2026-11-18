@@ -13,7 +13,7 @@ import theme
 
 
 def served(module_name):
-    """The page exactly as the app's index route sends it, or None if its dependencies are missing."""
+    """The assembled page before its CSS and script become files (assets.py), or skip if dependencies are missing."""
 
     with mock.patch.dict(os.environ, {"STORAGE_BACKEND": "local"}):
         try:
@@ -21,7 +21,7 @@ def served(module_name):
         except ImportError as error:
             raise unittest.SkipTest(f"{module_name} needs {error.name}")
 
-    return asyncio.run(module.index(None)).body.decode("utf-8")
+    return module.render_page() if module_name == "react_onboard" else module.theme.inject(module.PAGE)
 
 
 class ThemeInjectTests(unittest.TestCase):

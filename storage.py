@@ -4,7 +4,23 @@ Where onboarding data lives. STORAGE_BACKEND picks one:
 local (default)
     submissions/<id>.json, forms/<id>.json, uploads/<id>/<file>, hr_tables/<table>.csv
 
-mongo_s3   (the AWS deployment)
+dynamodb_s3   (the AWS deployment: AWS Lambda, DynamoDB and S3)
+    DynamoDB  DDB_APPLICATIONS_TABLE  one item per employee (key employee_id): the whole record, so its
+                                      status, flags and document_folder are top-level attributes
+              DDB_FORMS_TABLE         the form as submitted (key employee_id)
+              DDB_COUNTERS_TABLE      the atomic employee-ID counter (key name), UpdateItem ADD
+              A new ID is claimed when the application is SUBMITTED (a Draft item made with a conditional
+              put, attribute_not_exists), so nothing is ever overwritten and an abandoned form uses no ID.
+    S3        the same documents and HR tables as below. The browser uploads each file with a pre-signed
+              POST (one exact key, 5 minutes, size and type limited) to <S3_PREFIX>pending/<random id>/<name>;
+              on submit the files are checked, the ID is claimed and each file is copied to
+              <S3_PREFIX>employees/<ID>/documents/. A lifecycle rule expires pending/ after a day. HR reads
+              documents through a pre-signed GET that lasts 5 minutes.
+    Settings  SSM_PARAMETER_PREFIX + SSM_PARAMETER_NAMES: secrets (GEMINI_API_KEY; HR_USERS,
+              SESSION_SECRET) read once from SSM Parameter Store SecureStrings at start-up.
+
+mongo_s3   (DEPRECATED: the earlier AWS design; kept only so scripts/migrate_mongo_to_dynamodb.py can
+            read it. New deployments use dynamodb_s3.)
     MongoDB   database MONGODB_DB, collection applications: one document per student (_id = employee
               ID) holding the whole record; collection forms: the form as submitted; collection
               counters: the atomic employee-ID counter, safe across any number of containers.
@@ -34,6 +50,8 @@ import logging
 import os
 import re
 import threading
+import time
+from decimal import Decimal
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -143,6 +161,32 @@ class LocalStore:
 # 2. AMAZON S3
 # ==========================================================
 
+UPLOAD_URL_SECONDS = 300    # a pre-signed upload works for 5 minutes
+DOWNLOAD_URL_SECONDS = 300  # so does a pre-signed download
+
+# put_object argument -> the header a browser POST must carry for it
+ENCRYPTION_HEADERS = {"ServerSideEncryption": "x-amz-server-side-encryption", "SSEKMSKeyId": "x-amz-server-side-encryption-aws-kms-key-id"}
+
+# Document file name -> the only content type it may be uploaded as
+DOCUMENT_NAME = re.compile(r"[a-z][a-z0-9_]{0,39}\.(jpg|pdf)")
+
+# One application's uploads wait together under pending/<upload id>/ (a random uuid, 32 hex digits)
+UPLOAD_ID = re.compile(r"[0-9a-f]{32}")
+
+
+def new_upload_id():
+    import uuid
+
+    return uuid.uuid4().hex
+
+
+def document_content_type(filename):
+    """image/jpeg or application/pdf for a well-formed document name, None for anything else."""
+
+    match = DOCUMENT_NAME.fullmatch(filename or "")
+    return None if match is None else {"jpg": "image/jpeg", "pdf": "application/pdf"}[match.group(1)]
+
+
 class S3Store:
 
     def __init__(self, bucket, restricted_bucket, region, kms_key_id, prefix="", documents_bucket=None,
@@ -160,7 +204,16 @@ class S3Store:
         self.documents_bucket = documents_bucket
         self.prefix = prefix
         self.table_prefix = normalize_prefix(table_prefix)
-        self.client = boto3.client("s3", region_name=region or None)
+        # Regional endpoint and virtual-hosted addressing: a pre-signed link is then
+        # https://<bucket>.s3.<region>.amazonaws.com/..., the one address the pages' Content-Security-Policy
+        # and the bucket's CORS rule name (the global s3.amazonaws.com address redirects and breaks both)
+        from botocore.config import Config
+
+        self.client = boto3.client(
+            "s3", region_name=region or None,
+            endpoint_url=f"https://s3.{region}.amazonaws.com" if region else None,
+            config=Config(signature_version="s3v4", s3={"addressing_style": "virtual"}),
+        )
         self.encryption = (
             {"ServerSideEncryption": "aws:kms", "SSEKMSKeyId": kms_key_id}
             if kms_key_id else {"ServerSideEncryption": "AES256"}
@@ -262,6 +315,102 @@ class S3Store:
             Bucket=self.documents_bucket, Key=self._key(employee_id, f"documents/{filename}")
         )
 
+    # Direct browser uploads and HR downloads: the file bytes never pass through the server
+    direct_upload = False
+
+    def pending_key(self, upload_id, filename):
+        """Where a file waits before it has an owner: <prefix>pending/<upload id>/<filename>."""
+
+        if not UPLOAD_ID.fullmatch(upload_id or ""):
+            raise ValueError("Invalid upload id.")
+        return f"{self.prefix}pending/{upload_id}/{filename}"
+
+    def presign_upload(self, upload_id, filename, max_bytes):
+        """Pre-signed POST for exactly one key (<prefix>pending/<upload id>/<filename>).
+
+        The file waits under pending/ because no employee ID exists yet: the ID is claimed only when
+        the application is submitted, and the submit copies the file into the employee's own folder
+        (promote_upload). Valid for UPLOAD_URL_SECONDS; the file must be 1..max_bytes, of the one content
+        type the file name allows, and be encrypted the way the buckets are (SSE-S3 unless
+        S3_KMS_KEY_ID is set). A lifecycle rule expires pending/ after a day.
+        Returns {"url": ..., "fields": {...}}; the browser sends the fields, then the file last.
+        """
+
+        content_type = document_content_type(filename)
+        if content_type is None:
+            raise ValueError("Unsupported document name.")
+
+        fields = {"Content-Type": content_type}
+        conditions = [{"Content-Type": content_type}]
+
+        for argument, value in self.encryption.items():
+            header = ENCRYPTION_HEADERS[argument]
+            fields[header] = value
+            conditions.append({header: value})
+
+        conditions.append(["content-length-range", 1, max_bytes])
+
+        return self.client.generate_presigned_post(
+            Bucket=self.documents_bucket,
+            Key=self.pending_key(upload_id, filename),
+            Fields=fields,
+            Conditions=conditions,
+            ExpiresIn=UPLOAD_URL_SECONDS,
+        )
+
+    def promote_upload(self, upload_id, employee_id, filename):
+        """Copy a checked pending file into the employee's own folder. No delete: the pending copy
+        is removed by the lifecycle rule."""
+
+        self.client.copy_object(
+            Bucket=self.documents_bucket,
+            Key=self._key(employee_id, f"documents/{filename}"),
+            CopySource={"Bucket": self.documents_bucket, "Key": self.pending_key(upload_id, filename)},
+            MetadataDirective="COPY",
+            **self.encryption,
+        )
+
+    def check_upload(self, upload_id, filename, signature, max_bytes):
+        """None when the pending file exists with a valid size, type and first bytes, else a reason:
+        "missing", "empty", "too_large" or "wrong_type". Reads the object's header and 8 bytes of it."""
+
+        key = self.pending_key(upload_id, filename)
+
+        try:
+            head = self.client.head_object(Bucket=self.documents_bucket, Key=key)
+        except self.client.exceptions.ClientError:
+            return "missing"
+
+        if head["ContentLength"] <= 0:
+            return "empty"
+        if head["ContentLength"] > max_bytes:
+            return "too_large"
+        if head.get("ContentType") != document_content_type(filename):
+            return "wrong_type"
+
+        try:
+            first = self.client.get_object(
+                Bucket=self.documents_bucket, Key=key, Range=f"bytes=0-{len(signature) - 1}"
+            )["Body"].read()
+        except self.client.exceptions.ClientError:
+            return "missing"
+
+        return None if first.startswith(signature) else "wrong_type"
+
+    def presign_download(self, employee_id, filename):
+        """Pre-signed GET for one document, valid for DOWNLOAD_URL_SECONDS. Call it only for a logged-in HR user."""
+
+        return self.client.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": self.documents_bucket,
+                "Key": self._key(employee_id, f"documents/{filename}"),
+                "ResponseContentType": document_content_type(filename) or "application/octet-stream",
+                "ResponseContentDisposition": "inline",
+            },
+            ExpiresIn=DOWNLOAD_URL_SECONDS,
+        )
+
     # <table>/<employee_id>.parquet: Athena reads every file under the table's prefix
     def _table_bucket(self, table):
         return self.restricted_bucket if table in RESTRICTED_TABLES else self.bucket
@@ -316,7 +465,10 @@ def decode_keys(value):
 
 
 class MongoS3Store(S3Store):
-    """Records and forms in MongoDB; documents and HR tables in S3 (inherited)."""
+    """DEPRECATED: use DynamoS3Store (STORAGE_BACKEND=dynamodb_s3). Kept so
+    scripts/migrate_mongo_to_dynamodb.py can read the old MongoDB records.
+
+    Records and forms in MongoDB; documents and HR tables in S3 (inherited)."""
 
     COLLECTIONS = {"submission": "applications", "form": "forms"}
 
@@ -362,6 +514,166 @@ class MongoS3Store(S3Store):
 
     def has_form(self, employee_id):
         return self.db["forms"].count_documents({"_id": employee_id}, limit=1) > 0
+
+
+# ==========================================================
+# 2c. DYNAMODB (records) + S3 (documents and tables)
+# ==========================================================
+
+DRAFT = "Draft"            # an ID that was claimed and is waiting for its documents and form
+DRAFT_LIFETIME_DAYS = 7    # DynamoDB's TTL (attribute expires_at) removes an abandoned Draft after this
+
+
+class RecordNotFound(RuntimeError):
+    """A record was saved for an employee ID that was never claimed."""
+
+
+def to_item(value):
+    """JSON-style data -> DynamoDB attribute values (numbers must be Decimal, never float)."""
+
+    from boto3.dynamodb.types import TypeSerializer
+
+    return TypeSerializer().serialize(json.loads(json.dumps(value), parse_float=Decimal))
+
+
+def from_item(attribute):
+    """A DynamoDB attribute value -> the plain data it was made from."""
+
+    from boto3.dynamodb.types import TypeDeserializer
+
+    def plain(value):
+        if isinstance(value, Decimal):
+            return int(value) if value == value.to_integral_value() else float(value)
+        if isinstance(value, dict):
+            return {key: plain(item) for key, item in value.items()}
+        if isinstance(value, (list, set)):
+            return [plain(item) for item in value]
+        return value
+
+    return plain(TypeDeserializer().deserialize(attribute))
+
+
+class DynamoS3Store(S3Store):
+    """Records and forms in DynamoDB; documents and HR tables in S3 (inherited).
+
+    Uses the low-level client, which is safe across threads (a boto3 "resource" is not).
+    """
+
+    direct_upload = True
+
+    def __init__(self, tables, *s3_arguments, **s3_options):
+        import boto3
+
+        super().__init__(*s3_arguments, **s3_options)
+        self.tables = {"submission": tables["applications"], "form": tables["forms"], "counter": tables["counters"]}
+        self.ddb = boto3.client("dynamodb", region_name=s3_arguments[2] or None)
+
+    def _failed_condition(self, error):
+        return error.response["Error"]["Code"] == "ConditionalCheckFailedException"
+
+    def _get_item(self, table, employee_id, **options):
+        response = self.ddb.get_item(
+            TableName=self.tables[table], Key={"employee_id": {"S": employee_id}}, ConsistentRead=True, **options
+        )
+        return from_item({"M": response["Item"]}) if "Item" in response else None
+
+    def _scan(self, **options):
+        for page in self.ddb.get_paginator("scan").paginate(
+            TableName=self.tables["submission"], ConsistentRead=True, **options
+        ):
+            for item in page["Items"]:
+                yield from_item({"M": item})
+
+    def list_ids(self):
+        return [
+            item["employee_id"]
+            for item in self._scan(ProjectionExpression="employee_id, application_status")
+            if item.get("application_status") != DRAFT
+        ]
+
+    def list_records(self):
+        return [item for item in self._scan() if item.get("application_status") != DRAFT]
+
+    def claim_id(self, make_id, numbers):
+        """Claim the next ID, called when an application is submitted (not when files are uploaded).
+
+        The counter's UpdateItem ADD is atomic, so two callers never get the same number. The claim is
+        a Draft item made with a conditional put (attribute_not_exists): if that ID already has an item
+        (records moved in with the migration script, say) the next number is tried, and nothing is
+        overwritten. The Draft is hidden from HR and replaced by the real record; if the submit then
+        fails, DynamoDB's TTL removes the Draft after DRAFT_LIFETIME_DAYS (the number is not reused).
+        """
+
+        while True:
+            number = int(self.ddb.update_item(
+                TableName=self.tables["counter"],
+                Key={"name": {"S": "employee_id"}},
+                UpdateExpression="ADD seq :one",
+                ExpressionAttributeValues={":one": {"N": "1"}},
+                ReturnValues="UPDATED_NEW",
+            )["Attributes"]["seq"]["N"])
+
+            employee_id = make_id(number)
+
+            try:
+                self.ddb.put_item(
+                    TableName=self.tables["submission"],
+                    Item={
+                        "employee_id": {"S": employee_id},
+                        "application_status": {"S": DRAFT},
+                        "expires_at": {"N": str(int(time.time()) + DRAFT_LIFETIME_DAYS * 86400)},
+                    },
+                    ConditionExpression="attribute_not_exists(employee_id)",
+                )
+                return employee_id
+            except self.ddb.exceptions.ConditionalCheckFailedException:
+                continue
+
+
+    def get_json(self, kind, employee_id):
+        item = self._get_item(kind, employee_id)
+
+        if kind == "submission" and item and item.get("application_status") == DRAFT:
+            return None
+
+        if kind == "form" and item:
+            item.pop("employee_id", None)  # the key, not part of the form as submitted
+
+        return item
+
+    def put_json(self, kind, employee_id, data):
+        """Save the record (it must have been claimed: replaces its Draft or earlier version) or the form."""
+
+        options = {"ConditionExpression": "attribute_exists(employee_id)"} if kind == "submission" else {}
+
+        try:
+            self.ddb.put_item(
+                TableName=self.tables[kind], Item=to_item({**data, "employee_id": employee_id})["M"], **options
+            )
+        except self.ddb.exceptions.ConditionalCheckFailedException:
+            raise RecordNotFound("No claimed employee ID for this record.") from None
+
+    def import_json(self, kind, employee_id, data):
+        """Add a record or form that already exists elsewhere (sync_tables.py --from-local).
+
+        A conditional put: an item that is already here is left exactly as it is. Returns True when added.
+        """
+
+        try:
+            self.ddb.put_item(
+                TableName=self.tables[kind], Item=to_item({**data, "employee_id": employee_id})["M"],
+                ConditionExpression="attribute_not_exists(employee_id)",
+            )
+            return True
+        except self.ddb.exceptions.ConditionalCheckFailedException:
+            return False
+
+    def has_form(self, employee_id):
+        response = self.ddb.get_item(
+            TableName=self.tables["form"], Key={"employee_id": {"S": employee_id}},
+            ProjectionExpression="employee_id", ConsistentRead=True,
+        )
+        return "Item" in response
 
 
 # ==========================================================
@@ -469,18 +781,107 @@ def config_error(problems):
     return "Unsafe storage configuration, refusing to start:\n  - " + "\n  - ".join(problems)
 
 
-def check_config():
+def hr_login_problems():
+    """Why the HR sign-in settings are unsafe (names the variables, never a value)."""
+
+    import hr_login
+
+    problems = []
+
+    try:
+        users = hr_login.load_users({name: setting(name) for name in ("HR_USERS", "HR_USER", "HR_PASSWORD_HASH")})
+
+        if not users:
+            problems.append(
+                "HR_USERS is not set: without at least one HR user the HR portal would show "
+                "every employee's PAN, Aadhaar and bank details to anyone who can reach it."
+            )
+
+        without = sum(1 for user in users.values() if not user["totp"])
+        if without:
+            problems.append(
+                f"HR_USERS has {without} user(s) without an authenticator secret (totp): a password alone is "
+                "not enough for the HR portal. Enrol them with scripts/make_hr_password_hash.py."
+            )
+    except ValueError as error:
+        problems.append(f"{error}: make it with scripts/make_hr_password_hash.py.")
+
+    if setting("HR_PASSWORD"):
+        problems.append(
+            "HR_PASSWORD is set: the password must not be kept as plain text. Remove it and use HR_USERS."
+        )
+
+    if len(setting("SESSION_SECRET")) < hr_login.MIN_SECRET_LENGTH:
+        problems.append(
+            f"SESSION_SECRET is missing or shorter than {hr_login.MIN_SECRET_LENGTH} characters: it signs the HR sign-in cookie."
+        )
+
+    return problems
+
+# Environment variable -> default table name (the names the setup guide creates)
+DDB_TABLE_DEFAULTS = {
+    "DDB_APPLICATIONS_TABLE": "hr-onboarding-applications",
+    "DDB_FORMS_TABLE": "hr-onboarding-forms",
+    "DDB_COUNTERS_TABLE": "hr-onboarding-counters",
+}
+
+_ssm_loaded = False
+
+
+def load_ssm_settings():
+    """Read secrets from SSM Parameter Store once, at start-up, into os.environ.
+
+    SSM_PARAMETER_PREFIX (e.g. /hr-onboarding/portal/) and SSM_PARAMETER_NAMES (e.g. GEMINI_API_KEY)
+    name the SecureString parameters; each becomes the setting of the same name. A real environment
+    variable wins. Cached for the life of the process (a Lambda container), so a warm request makes
+    no SSM call. Does nothing when SSM_PARAMETER_PREFIX is unset (local runs).
+    """
+
+    global _ssm_loaded
+
+    prefix = setting("SSM_PARAMETER_PREFIX")
+    names = [name.strip() for name in setting("SSM_PARAMETER_NAMES").split(",") if name.strip()]
+
+    if _ssm_loaded or not prefix or not names:
+        return
+
+    import boto3
+
+    prefix = prefix if prefix.endswith("/") else prefix + "/"
+    wanted = [name for name in names if not os.environ.get(name)]
+
+    if wanted:
+        response = boto3.client("ssm", region_name=os.environ.get("AWS_REGION") or None).get_parameters(
+            Names=[prefix + name for name in wanted], WithDecryption=True
+        )
+
+        for parameter in response["Parameters"]:
+            os.environ.setdefault(parameter["Name"][len(prefix):], parameter["Value"])
+
+        missing = [name for name in wanted if not os.environ.get(name)]
+        if missing:
+            # Names only, never values
+            raise RuntimeError("SSM parameters not found or not readable: " + ", ".join(missing))
+
+    _ssm_loaded = True
+
+
+def check_config(require_hr_login=False):
     """Fail loudly, before serving anything, if the S3 settings could expose sensitive data.
 
     Reads .env like get_store(), connects to nothing, and prints no values. The local backend has
-    no S3 settings, so it passes.
+    no S3 settings, so it passes. The HR portal passes require_hr_login=True: with a real backend
+    it must not start without a login, because it shows every employee's PAN and Aadhaar.
     """
 
     load_env_file(BASE_DIR / ".env")
     backend = setting("STORAGE_BACKEND").lower() or "local"
 
-    if backend not in ("s3", "mongo_s3"):
+    if backend not in ("s3", "mongo_s3", "dynamodb_s3"):
         return
+
+    # Secrets kept in SSM Parameter Store become settings before anything below looks at them
+    load_ssm_settings()
 
     problems = []
 
@@ -495,6 +896,24 @@ def check_config():
             "land inside the shared Athena table folders. Set it, e.g. onboarding/."
         )
 
+    if backend == "dynamodb_s3":
+        if not setting("S3_PREFIX"):
+            problems.append(
+                "S3_PREFIX is empty with STORAGE_BACKEND=dynamodb_s3: the documents must go under one "
+                "folder (onboarding/) so the function's role can be limited to it."
+            )
+
+        # The tables have defaults, so only a value that is set but unusable is a problem
+        names = [setting(name) or default for name, default in DDB_TABLE_DEFAULTS.items()]
+        if len(set(names)) != len(names):
+            problems.append("DDB_APPLICATIONS_TABLE, DDB_FORMS_TABLE and DDB_COUNTERS_TABLE must be three different tables.")
+
+        if setting("SSM_PARAMETER_NAMES") and not setting("SSM_PARAMETER_PREFIX"):
+            problems.append("SSM_PARAMETER_NAMES is set but SSM_PARAMETER_PREFIX is not.")
+
+    if require_hr_login:
+        problems += hr_login_problems()
+
     if problems:
         raise RuntimeError(config_error(problems))
 
@@ -508,7 +927,7 @@ def get_store():
             check_config()
             backend = os.environ.get("STORAGE_BACKEND", "local").strip().lower() or "local"
 
-            if backend in ("s3", "mongo_s3"):
+            if backend in ("s3", "mongo_s3", "dynamodb_s3"):
                 s3_arguments = (
                     setting("S3_BUCKET"),
                     setting("S3_RESTRICTED_BUCKET"),
@@ -523,6 +942,13 @@ def get_store():
 
                 if backend == "s3":
                     _store = S3Store(*s3_arguments, **s3_options)
+                elif backend == "dynamodb_s3":
+                    tables = {
+                        "applications": setting("DDB_APPLICATIONS_TABLE") or DDB_TABLE_DEFAULTS["DDB_APPLICATIONS_TABLE"],
+                        "forms": setting("DDB_FORMS_TABLE") or DDB_TABLE_DEFAULTS["DDB_FORMS_TABLE"],
+                        "counters": setting("DDB_COUNTERS_TABLE") or DDB_TABLE_DEFAULTS["DDB_COUNTERS_TABLE"],
+                    }
+                    _store = DynamoS3Store(tables, *s3_arguments, **s3_options)
                 else:
                     uri = os.environ.get("MONGODB_URI")
                     if not uri:

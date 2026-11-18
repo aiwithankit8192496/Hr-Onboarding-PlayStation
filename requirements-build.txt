@@ -1,0 +1,2 @@
+# only the image build and the tests need these (Babel runs in V8 to compile the pages' JSX); not shipped
+mini-racer

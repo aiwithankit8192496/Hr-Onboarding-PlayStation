@@ -6,18 +6,19 @@ documents they came from (zoom, rotate, full screen), with a "Matches" tick and 
 every field and document, and the "Need to reconsider" results beside the items they concern.
 
 Reads and writes each employee's record and documents through storage.py (local folders,
-or one S3 folder per employee with STORAGE_BACKEND=s3). Set HR_USER and HR_PASSWORD to
-require a login; leave them unset only on a local machine.
+or DynamoDB and S3 on AWS). Sign-in is a login form and a signed session cookie (hr_login.py); set
+HR_USERS (or HR_USER + HR_PASSWORD_HASH) and SESSION_SECRET to require it, and leave them unset only on a local machine.
 
 Run:
     python hr_info.py
 Then open http://localhost:8001
 """
 
-import base64
 import datetime
 import hmac
+import http.cookies
 import json
+import logging
 import os
 import re
 import secrets
@@ -28,11 +29,18 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, Response
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
+import assets
+import hr_login
+import jsonlog
 import storage
 import theme
+from security_headers import SecurityHeaders
+
+jsonlog.setup()  # JSON log lines with the level and the employee ID only, never personal details
+log = logging.getLogger("hr")
 
 
 # ==========================================================
@@ -43,7 +51,7 @@ BASE_DIR = Path(__file__).resolve().parent
 
 # Local folders or S3, chosen by STORAGE_BACKEND (see storage.py); .env is read first
 storage.load_env_file(BASE_DIR / ".env")
-storage.check_config()  # refuse to start on an unsafe S3 setup (see storage.py)
+storage.check_config(require_hr_login=True)  # refuse to start on an unsafe S3 or login setup (see storage.py)
 
 HOST = os.environ.get("HOST", "127.0.0.1")  # 0.0.0.0 inside a container
 PORT = int(os.environ.get("PORT", "8001"))
@@ -157,13 +165,14 @@ def not_found():
 
 
 async def index(request: Request):
-    return HTMLResponse(theme.inject(PAGE))
+    return ASSETS.page("hr")
 
 
 async def employees(request: Request):
 
     # One query for every record (MongoDB), not one lookup per employee
     records = storage.get_store().list_records()
+    log.info("HR viewed the list: %d application(s)", len(records))
     for record in records:
         if record.get("application_status") in (None, LEGACY_NEW):
             record["application_status"] = STATUSES[0]
@@ -186,6 +195,8 @@ async def employee_detail(request: Request):
     if record is None:
         return not_found()
 
+    jsonlog.set_employee(employee_id)
+    log.info("HR viewed application")
     return JSONResponse(detail_payload(record))
 
 
@@ -210,9 +221,25 @@ async def employee_document(request: Request):
     document = request.path_params["document"]
     content = None
 
+    store = storage.get_store()
+
     if document in DOCUMENTS and EMPLOYEE_ID_PATTERN.fullmatch(employee_id):
         file_type = DOCUMENTS[document][1]
-        content = storage.get_store().get_document(employee_id, f"{document}.{file_type}")
+        filename = f"{document}.{file_type}"
+
+        # On AWS the file does not pass through this function: HR is sent to a link that works
+        # for 5 minutes. Only a logged-in HR user gets here (SessionAuth runs first).
+        if hasattr(store, "presign_download"):
+            if filename not in store.list_documents(employee_id):
+                return JSONResponse({"error": "Document not found."}, status_code=404)
+            jsonlog.set_employee(employee_id)
+            log.info("Document opened")
+            return RedirectResponse(
+                store.presign_download(employee_id, filename), status_code=302,
+                headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+            )
+
+        content = store.get_document(employee_id, filename)
 
     if content is None:
         return JSONResponse({"error": "Document not found."}, status_code=404)
@@ -247,6 +274,8 @@ async def update_status(request: Request):
     record["application_status"] = status
     record["reviewed_at"] = datetime.datetime.now().isoformat()
     save_record(record)
+    jsonlog.set_employee(employee_id)
+    log.info("HR set the application to %s", status)  # Approved, Rejected or Pending
 
     return JSONResponse(detail_payload(record))
 
@@ -338,6 +367,8 @@ async def request_changes(request: Request):
     record["application_status"] = "Changes Requested"
     record["reviewed_at"] = now
     save_record(record)
+    jsonlog.set_employee(employee_id)
+    log.info("HR flagged the application: %d new flag(s)", len(new_flags))
 
     return JSONResponse(detail_payload(record))
 
@@ -773,13 +804,32 @@ const STATUS_CLASS = {
 const isUpdated = (employee) => Boolean(employee.resubmitted_at) && employee.application_status === "New";
 const UPDATED_FILTER = "Updated applications";
 
+// Behind CloudFront's origin access control a POST must carry the SHA-256 of its body in
+// x-amz-content-sha256, or the request is refused (403)
+async function withBodyHash(options = {}) {
+  if (typeof options.body !== "string" || !(window.crypto && crypto.subtle)) return options;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(options.body));
+  const hex = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return { ...options, headers: { ...options.headers, "x-amz-content-sha256": hex } };
+}
+
+// true when the portal asks for a sign-in (the sign-out button is shown)
+const AUTH_ON = __AUTH_ON__;
+
+async function signOut() {
+  await request("/logout", { method: "POST", body: "{}", headers: { "Content-Type": "application/json" } }).catch(() => {});
+  location.href = "/login";
+}
+
 async function request(url, options) {
   let response;
   try {
-    response = await fetch(url, options);
+    response = await fetch(url, await withBodyHash(options));
   } catch {
     throw new Error("Could not reach the server. Is hr_info.py still running?");
   }
+  // The 8-hour sign-in ended: back to the login form
+  if (response.status === 401 && AUTH_ON) { location.href = "/login"; throw new Error("Please sign in again."); }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `Request failed (${response.status}).`);
   return data;
@@ -1789,6 +1839,7 @@ function App() {
           <button type="button" className="btn light" onClick={() => loadEmployees()} disabled={loading}>
             ⟳ Refresh
           </button>
+          {AUTH_ON && <button type="button" className="btn light" onClick={signOut}>Sign out</button>}
         </div>
       </header>
 
@@ -1859,44 +1910,236 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 # 5. SERVER
 # ==========================================================
 
-class BasicAuth:
-    """HTTP Basic login for the whole portal when HR_USER and HR_PASSWORD are set.
+# The HR users: HR_USERS, a JSON map of user name -> password hash (one SSM SecureString on AWS), or the
+# single pair HR_USER + HR_PASSWORD_HASH. The sign-in is on when there is at least one (always on AWS: see
+# storage.check_config); it is off only on a laptop with none.
+try:
+    USERS = hr_login.load_users()
+except ValueError as error:
+    raise RuntimeError(f"{error}.") from None
 
-    /health stays open for the load balancer's health check. Behind HTTPS only: Basic
-    sends the password with every request.
+AUTH_ON = bool(USERS)
+SESSION_SECRET = os.environ.get("SESSION_SECRET", "")
+COOKIE_SECURE = os.environ.get("HR_COOKIE_SECURE", "1") != "0"  # "0" only for http://localhost in a browser that refuses it
+
+if AUTH_ON and len(SESSION_SECRET) < hr_login.MIN_SECRET_LENGTH:
+    raise RuntimeError(f"SESSION_SECRET is missing or shorter than {hr_login.MIN_SECRET_LENGTH} characters.")
+
+_throttle = None
+
+
+def get_throttle():
+    """Wrong-password counting. On AWS it lives in DynamoDB (the counters table, key login#<user>, TTL 5
+    minutes), so it holds across every Lambda copy; on a laptop it is in memory."""
+
+    global _throttle
+
+    if _throttle is None:
+        store = storage.get_store()
+        if hasattr(store, "ddb"):
+            _throttle = hr_login.DynamoThrottle(store.ddb, store.tables["counter"], USERS)
+        else:
+            _throttle = hr_login.Throttle()
+
+    return _throttle
+
+
+def throttle_key(user):
+    return user if user in USERS else hr_login.UNKNOWN_USER
+
+
+# A password check is slow on purpose; a user name that does not exist is checked against this so both take as long
+DUMMY_HASH = hr_login.hash_password("not the password")
+DUMMY_TOTP = hr_login.generate_totp_secret()
+
+OPEN_PATHS = ("/health", "/login")
+
+
+class SessionAuth:
+    """Everything except /health, /login and /assets/ needs the signed session cookie from a successful sign-in.
+
+    No cookie, a forged or an expired one, or one for a user who is no longer in HR_USERS: an API call gets
+    401 JSON, a page is sent to /login. The user's login name is put on every log line of the request.
     """
 
     def __init__(self, app):
         self.app = app
-        self.user = os.environ.get("HR_USER", "")
-        self.password = os.environ.get("HR_PASSWORD", "")
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http" and self.user and self.password and scope["path"] != "/health":
-            header = dict(scope["headers"]).get(b"authorization", b"").decode()
-            try:
-                user, _, password = base64.b64decode(header.removeprefix("Basic ")).decode().partition(":")
-            except ValueError:
-                user = password = ""
+        # /assets/ holds only the pages' own code (no data); the sign-in form needs it before there is a cookie
+        if scope["type"] == "http" and AUTH_ON and scope["path"] not in OPEN_PATHS and not scope["path"].startswith("/assets/"):
+            cookies = http.cookies.SimpleCookie(dict(scope["headers"]).get(b"cookie", b"").decode())
+            morsel = cookies.get(hr_login.COOKIE_NAME)
+            user = hr_login.read_session(morsel.value if morsel else "", SESSION_SECRET)
 
-            if not (hmac.compare_digest(user, self.user) and hmac.compare_digest(password, self.password)):
-                denied = Response(
-                    "Login required.", status_code=401,
-                    headers={"WWW-Authenticate": 'Basic realm="HR Review Portal"'},
-                )
+            if user not in USERS:
+                if scope["path"].startswith("/api/"):
+                    denied = JSONResponse({"error": "Please sign in again."}, status_code=401)
+                else:
+                    denied = RedirectResponse("/login", status_code=302)
                 return await denied(scope, receive, send)
 
+            jsonlog.set_hr_user(user)
+
         await self.app(scope, receive, send)
+
+
+async def login_page(request: Request):
+    return ASSETS.page("login")
+
+
+async def login(request: Request):
+
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        body = None
+
+    user = str(body.get("user") or "") if isinstance(body, dict) else ""
+    password = str(body.get("password") or "") if isinstance(body, dict) else ""
+    code = str(body.get("code") or "") if isinstance(body, dict) else ""
+    throttle = get_throttle()
+
+    try:
+        if throttle.blocked(throttle_key(user)):
+            log.warning("HR sign-in refused: too many wrong attempts")
+            return JSONResponse({"error": "Too many wrong attempts. Wait a few minutes and try again."}, status_code=429)
+    except Exception:
+        # Fail closed: without the counter there is no protection against guessing
+        log.exception("HR sign-in counter unavailable")
+        return JSONResponse({"error": "Sign-in is temporarily unavailable. Please try again in a minute."}, status_code=503)
+
+    # Password and one-time code are both always checked, so neither the time taken nor the answer
+    # shows which of the user name, the password or the code was wrong
+    entry = USERS.get(user)
+    password_ok = hr_login.verify_password(password, entry["hash"] if entry else DUMMY_HASH)
+    secret = entry["totp"] if entry else None
+    step = hr_login.check_totp(secret or DUMMY_TOTP, code)
+    code_ok = step is not None if secret else True  # a user with no secret exists only on a laptop (see storage.check_config)
+    good = AUTH_ON and bool(entry) and password_ok and code_ok
+
+    if good and secret:
+        try:
+            good = throttle.use_step(user, step)  # a code works once: the same one again is refused
+        except Exception:
+            log.exception("HR sign-in counter unavailable")
+            return JSONResponse({"error": "Sign-in is temporarily unavailable. Please try again in a minute."}, status_code=503)
+
+    if not good:
+        # The tried name is not logged: someone may type a password or an e-mail address into it.
+        # A wrong code counts toward the lock-out exactly like a wrong password.
+        log.warning("HR sign-in failed")
+        try:
+            throttle.fail(throttle_key(user))
+        except Exception:
+            log.exception("HR sign-in counter unavailable")
+        return JSONResponse({"error": "Wrong user name, password or code."}, status_code=401)
+
+    try:
+        throttle.clear(throttle_key(user))
+    except Exception:
+        log.exception("HR sign-in counter unavailable")
+
+    jsonlog.set_hr_user(user)
+    log.info("HR sign-in")
+    response = JSONResponse({"ok": True})
+    response.headers["Set-Cookie"] = hr_login.cookie_header(hr_login.make_session(user, SESSION_SECRET), COOKIE_SECURE)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+async def logout(request: Request):
+    log.info("HR sign-out")
+    response = JSONResponse({"ok": True})
+    response.headers["Set-Cookie"] = hr_login.cookie_header("", COOKIE_SECURE)
+    return response
+
+
+LOGIN_PAGE = r"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>HR Review Portal: sign in</title>
+<!-- __THEME_HEAD__ -->
+<style>
+  :root { --bg: #f5f6f8; --card: #fff; --ink: #1a1d23; --muted: #5b6270; --line: #dfe3ea; --accent: #4f46e5; --error: #b42318; }
+  :root[data-theme="dark"] { --bg: #13151a; --card: #1c1f26; --ink: #eef0f4; --muted: #9aa2b1; --line: #2c313b; --accent: #818cf8; --error: #f97066; }
+  html, body { height: 100%; margin: 0; }
+  body { display: flex; align-items: center; justify-content: center; padding: 16px; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  form { width: 100%; max-width: 360px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 28px 24px; display: flex; flex-direction: column; gap: 14px; }
+  h1 { margin: 0; font-size: 20px; }
+  p { margin: 0; color: var(--muted); font-size: 14px; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; font-weight: 600; }
+  input { font: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  button { font: inherit; font-weight: 600; padding: 10px 12px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: default; }
+  #error { color: var(--error); font-size: 14px; min-height: 1.2em; }
+  /* __THEME_CSS__ */
+</style>
+</head>
+<body>
+<form id="form" autocomplete="on">
+  <h1>HR Review Portal</h1>
+  <p>Sign in to review onboarding applications. Enter the 6-digit code from your authenticator app.</p>
+  <label>User name <input name="user" id="user" autocomplete="username" required autofocus></label>
+  <label>Password <input name="password" id="password" type="password" autocomplete="current-password" required></label>
+  <label>Authenticator code <input name="code" id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="6 digits"></label>
+  <div id="error" role="alert"></div>
+  <button id="go" type="submit">Sign in</button>
+</form>
+<script>
+// Behind CloudFront's origin access control a POST must carry the SHA-256 of its body in x-amz-content-sha256
+async function postJson(url, payload) {
+  const body = JSON.stringify(payload);
+  const headers = { "Content-Type": "application/json" };
+  if (window.crypto && crypto.subtle) {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body));
+    headers["x-amz-content-sha256"] = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  return fetch(url, { method: "POST", headers, body });
+}
+document.getElementById("form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const error = document.getElementById("error"), button = document.getElementById("go");
+  error.textContent = "";
+  button.disabled = true;
+  try {
+    const response = await postJson("/login", { user: document.getElementById("user").value, password: document.getElementById("password").value, code: document.getElementById("code").value });
+    if (response.ok) { location.href = "/"; return; }
+    const data = await response.json().catch(() => ({}));
+    error.textContent = data.error || "Could not sign in.";
+  } catch {
+    error.textContent = "Could not reach the server. Please try again.";
+  }
+  button.disabled = false;
+});
+</script>
+</body>
+</html>
+"""
 
 
 async def health(request: Request):
     return JSONResponse({"ok": True})
 
 
+# The pages' CSS and JavaScript are files of our own (compiled once, see assets.py): no inline code, no CDN
+ASSETS = assets.AssetSet("hr", {
+    "hr": lambda: theme.inject(PAGE),
+    "login": lambda: theme.inject(LOGIN_PAGE),
+})
+ASSETS.tokens = lambda: {"__AUTH_ON__": "true" if AUTH_ON else "false"}
+
 app = Starlette(
     routes=[
+        *ASSETS.routes(),
         Route("/", index),
         Route("/health", health),
+        Route("/login", login_page),
+        Route("/login", login, methods=["POST"]),
+        Route("/logout", logout, methods=["POST"]),
         Route("/api/employees", employees),
         Route("/api/employees/{employee_id}", employee_detail),
         Route("/api/employees/{employee_id}/documents/{document}", employee_document),
@@ -1904,10 +2147,11 @@ app = Starlette(
         Route("/api/employees/{employee_id}/flags", request_changes, methods=["POST"]),
         Route("/api/employees/{employee_id}/verification", save_verification, methods=["POST"]),
     ],
-    middleware=[Middleware(BasicAuth), Middleware(GZipMiddleware, minimum_size=1024)],
+    middleware=[Middleware(SecurityHeaders, portal="hr"), Middleware(SessionAuth), Middleware(GZipMiddleware, minimum_size=1024)],
 )
 
 
 if __name__ == "__main__":
     print(f"HR Review Portal running at http://localhost:{PORT}")
-    uvicorn.run(app, host=HOST, port=PORT)
+    # access_log off: the employee's edit link carries a secret token in the URL
+    uvicorn.run(app, host=HOST, port=PORT, access_log=False)

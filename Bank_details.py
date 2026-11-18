@@ -375,7 +375,7 @@ function BankDetails({ form, update, files, setFile }) {
     setReading(true);
     setMessage(null);
     const body = new FormData();
-    if (files.bank_proof) body.append("bank_proof", files.bank_proof);
+    if (files.bank_proof) body.append("bank_proof", await shrinkForReading(files.bank_proof));
     if (files.payslips.length) body.append("payslip", files.payslips[0]);
     if (files.relieving_letter) body.append("relieving_letter", files.relieving_letter);
     body.append("identity", JSON.stringify({
