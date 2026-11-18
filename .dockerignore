@@ -9,3 +9,23 @@ hr_tables
 Data
 static/dist
 tools/__pycache__
+
+# Not needed inside the image (the Dockerfile copies only what it names, but this keeps the build context small)
+archive
+tests
+src
+cloudfront
+docs
+*.md
+*.html
+*.svg
+*.pdf
+*.tf
+.pytest_cache
+.streamlit
+Caddyfile
+docker-compose*.yml
+requirements-dev.txt
+uv.lock
+pyproject.toml
+.python-version
