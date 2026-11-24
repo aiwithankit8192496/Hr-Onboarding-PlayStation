@@ -50,8 +50,11 @@ def policy(portal):
             f"frame-src 'self' {bucket}".strip(),
         ]
 
-    # frame-ancestors: nobody may put the page in a frame. base-uri and form-action close two small gaps.
-    directives += ["frame-ancestors 'none'", "base-uri 'self'", "form-action 'self'"]
+    # frame-ancestors: no other site may put the page in a frame. The HR portal frames its own
+    # document files (the certificate / payslip viewer), and a response says who may frame it, so
+    # its pages must allow 'self'; with 'none' the viewer shows "localhost refused to connect".
+    ancestors = "'self'" if portal == "hr" else "'none'"
+    directives += [f"frame-ancestors {ancestors}", "base-uri 'self'", "form-action 'self'"]
 
     return "; ".join(directives)
 

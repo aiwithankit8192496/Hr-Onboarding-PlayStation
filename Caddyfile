@@ -8,7 +8,8 @@
 	header {
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
-		X-Frame-Options "DENY"
+		# SAMEORIGIN, not DENY: the HR page shows documents in a frame of its own site
+		X-Frame-Options "SAMEORIGIN"
 		Referrer-Policy "no-referrer"
 		Permissions-Policy "camera=(self), microphone=(), geolocation=()"
 		# Never keep ID documents or personal data in the browser cache or a shared proxy

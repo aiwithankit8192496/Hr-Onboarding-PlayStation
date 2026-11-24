@@ -125,9 +125,20 @@ load_env_file(BASE_DIR / ".env")
 # The model id can be changed with GEMMA_MODEL; the default is below
 GEMMA_MODEL = os.environ.get("GEMMA_MODEL", "gemma-4-26b-a4b-it")
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-GEMINI_RETRIES = 4
 GEMINI_HOST = urllib.parse.urlsplit(GEMINI_URL).netloc
-GEMINI_TIMEOUT = 45  # a call that hangs is retried sooner than the old 120s wait
+
+# Call settings tuned for latency: a capped reply (the JSON is short), minimal thinking, and a
+# 30 s timeout so a hung call is retried sooner (it was 45 s). 503/429 are retried with back-off.
+# PRIMARY_MODEL (a fast Gemini model) is tried first, with 2 tries and a 15 s timeout. Gemma is the
+# fallback: it often answers 503 "high demand" on the shared API, so it is not the first choice.
+PRIMARY_MODEL = os.environ.get("PRIMARY_MODEL", "gemini-flash-lite-latest")
+FALLBACK_MODEL = GEMMA_MODEL
+MODEL_SETTINGS = {
+    "model": PRIMARY_MODEL, "retries": 2, "timeout": 15, "max_output_tokens": 2048, "thinking": "minimal",
+}
+FALLBACK_SETTINGS = {
+    "model": FALLBACK_MODEL, "retries": 3, "timeout": 30, "max_output_tokens": 2048, "thinking": "minimal",
+}
 _connections = threading.local()
 
 HOST = os.environ.get("HOST", "127.0.0.1")  # 0.0.0.0 inside a container
@@ -261,7 +272,7 @@ def shrink_image(image_data):
     image = Image.open(io.BytesIO(image_data)).convert("RGB")
     image.thumbnail((1024, 1024))  #resize into frame
     buffer = io.BytesIO()
-    image.save(buffer, format="JPEG", quality=90)
+    image.save(buffer, format="JPEG", quality=80)  # smaller upload, no visible loss for text
     return buffer.getvalue()
 
 
@@ -311,17 +322,32 @@ def extract_document_details(images, document_type):
 
 
 def gemini_generate(prompt, images=(), schema=None):
-    """Send the prompt and JPEG images to the AI model on the Gemini API; return its JSON reply text."""
+    """Ask the primary model; if it fails (503 high demand, timeout ...), ask Gemma.
+    Returns the JSON reply text."""
+
+    try:
+        return call_model(MODEL_SETTINGS, prompt, images, schema)
+    except Exception as error:
+        log.warning("%s failed (%s); using %s", PRIMARY_MODEL, str(error)[:120].replace("\n", " "), FALLBACK_MODEL)
+
+    return call_model(FALLBACK_SETTINGS, prompt, images, schema)
+
+
+def call_model(settings, prompt, images=(), schema=None):
+    """One model on the Gemini API, with its own retries and timeout; return its JSON reply text."""
 
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not set.")
 
+    retries, timeout = settings["retries"], settings["timeout"]
+
     # Minimal thinking: the model otherwise spends seconds on hidden reasoning tokens
     config = {
         "temperature": 0,
+        "maxOutputTokens": settings["max_output_tokens"],
         "responseMimeType": "application/json",
-        "thinkingConfig": {"thinkingLevel": "minimal"},
+        "thinkingConfig": {"thinkingLevel": settings["thinking"]},
     }
     if schema:
         config["responseSchema"] = schema
@@ -333,15 +359,16 @@ def gemini_generate(prompt, images=(), schema=None):
 
     body = json.dumps({"contents": [{"role": "user", "parts": parts}], "generationConfig": config}).encode()
     headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
-    path = urllib.parse.urlsplit(GEMINI_URL.format(model=GEMMA_MODEL)).path
+    path = urllib.parse.urlsplit(GEMINI_URL.format(model=settings["model"])).path
 
-    for attempt in range(GEMINI_RETRIES):
-        # A kept-alive connection skips the TCP + TLS handshake on every call after the first
-        connection = getattr(_connections, "gemini", None)
+    for attempt in range(retries):
+        # A kept-alive connection skips the TCP + TLS handshake on every call after the first;
+        # one per thread and per timeout, so the primary's short timeout is never shared
+        slot = f"gemini_{timeout}"
+        connection = getattr(_connections, slot, None)
         if connection is None:
-            connection = _connections.gemini = http.client.HTTPSConnection(
-                GEMINI_HOST, timeout=GEMINI_TIMEOUT
-            )
+            connection = http.client.HTTPSConnection(GEMINI_HOST, timeout=timeout)
+            setattr(_connections, slot, connection)
 
         try:
             connection.request("POST", path, body, headers)
@@ -350,8 +377,8 @@ def gemini_generate(prompt, images=(), schema=None):
         except (OSError, http.client.HTTPException):
             # Stale connection or a hung call: drop it and try again on a fresh one
             connection.close()
-            _connections.gemini = None
-            if attempt == GEMINI_RETRIES - 1:
+            setattr(_connections, slot, None)
+            if attempt == retries - 1:
                 raise
             continue
 
@@ -360,7 +387,7 @@ def gemini_generate(prompt, images=(), schema=None):
             break
 
         # The API sometimes answers 500/503/429 for a call that works on retry
-        if response.status not in (429, 500, 502, 503) or attempt == GEMINI_RETRIES - 1:
+        if response.status not in (429, 500, 502, 503) or attempt == retries - 1:
             raise RuntimeError(f"Gemini API error {response.status}: {raw.decode(errors='replace')[:300]}")
         time.sleep(2 ** attempt)
 

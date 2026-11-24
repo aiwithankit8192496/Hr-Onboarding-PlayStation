@@ -2,5 +2,6 @@
 moto[s3,dynamodb,ssm]
 pytest
 pymongo  # only scripts/migrate_mongo_to_dynamodb.py and the deprecated mongo_s3 backend
+qrcode  # only scripts/make_hr_password_hash.py (prints a QR code for the authenticator app); optional
 httpx
 mini-racer

@@ -43,6 +43,9 @@ RUN python scripts/build_assets.py
 # ---- Stage 2: the image that runs ------------------------------------------------------------------
 FROM ${PYTHON_IMAGE}
 
+# Apply OS security patches published since the base image was built
+RUN apt-get update && apt-get -y upgrade && rm -rf /var/lib/apt/lists/*
+
 # The adapter is a small binary; it only acts when running on Lambda
 COPY --from=adapter /lambda-adapter /opt/extensions/lambda-adapter
 

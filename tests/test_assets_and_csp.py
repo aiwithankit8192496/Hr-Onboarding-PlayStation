@@ -157,7 +157,11 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("connect-src 'self';", policy)
         self.assertIn(f"img-src 'self' data: blob: {BUCKET_ORIGIN};", policy)
         self.assertIn(f"frame-src 'self' {BUCKET_ORIGIN};", policy)
-        self.assertIn("frame-ancestors 'none'", policy)
+        # the HR page frames its own document files, so only itself may frame (never another site)
+        self.assertIn("frame-ancestors 'self'", policy)
+
+    def test_the_employee_page_may_not_be_framed_at_all(self):
+        self.assertIn("frame-ancestors 'none'", security_headers.policy("onboarding"))
 
     def test_never_unsafe_inline_or_eval_or_a_wildcard(self):
         with mock.patch.dict(os.environ, {"STORAGE_BACKEND": "dynamodb_s3", "S3_DOCUMENTS_BUCKET": DOCS, "AWS_REGION": REGION}):
