@@ -15,13 +15,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
 from py_mini_racer import MiniRacer
 
-import assets
-import security_headers
+from hr_onboarding import assets
+from hr_onboarding import security_headers
 from test_dynamo_store import DOCS, ENV, REGION, AwsTestCase, HR_USERS, HR_SECRET
 
 BUCKET_ORIGIN = f"https://{DOCS}.s3.{REGION}.amazonaws.com"
@@ -41,7 +38,7 @@ class BuiltPagesTests(unittest.TestCase):
         local = {key: value for key, value in ENV.items() if key in ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP")}
         cls.patch = mock.patch.dict(os.environ, {**local, "HR_USERS": json.dumps(HR_USERS), "SESSION_SECRET": HR_SECRET}, clear=True)
         cls.patch.start()
-        cls.onboard, cls.hr = fresh("react_onboard", {}), fresh("hr_info", {})
+        cls.onboard, cls.hr = fresh("hr_onboarding.employee_portal", {}), fresh("hr_onboarding.hr_portal", {})
         cls.folder = tempfile.TemporaryDirectory()
         cls.sets = {
             "onboard": assets.AssetSet("onboard", {"index": cls.onboard.render_page}, dist=cls.folder.name),
@@ -54,8 +51,8 @@ class BuiltPagesTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.patch.stop()
         cls.folder.cleanup()
-        sys.modules.pop("react_onboard", None)
-        sys.modules.pop("hr_info", None)
+        sys.modules.pop("hr_onboarding.employee_portal", None)
+        sys.modules.pop("hr_onboarding.hr_portal", None)
 
     def pages(self):
         return [(f"{name}/{page}", html) for name, built in self.sets.items() for page, html in built.html.items()]
@@ -186,10 +183,10 @@ class ServerHeaderTests(AwsTestCase):
         patch = mock.patch.dict(os.environ, {"HR_USERS": json.dumps(HR_USERS), "SESSION_SECRET": HR_SECRET})
         patch.start()
         self.addCleanup(patch.stop)
-        self.portal = TestClient(fresh("react_onboard", {}).app, base_url="https://testserver", follow_redirects=False)
-        self.hr = TestClient(fresh("hr_info", {}).app, base_url="https://testserver", follow_redirects=False)
-        self.addCleanup(sys.modules.pop, "react_onboard", None)
-        self.addCleanup(sys.modules.pop, "hr_info", None)
+        self.portal = TestClient(fresh("hr_onboarding.employee_portal", {}).app, base_url="https://testserver", follow_redirects=False)
+        self.hr = TestClient(fresh("hr_onboarding.hr_portal", {}).app, base_url="https://testserver", follow_redirects=False)
+        self.addCleanup(sys.modules.pop, "hr_onboarding.employee_portal", None)
+        self.addCleanup(sys.modules.pop, "hr_onboarding.hr_portal", None)
 
     def assertHardened(self, reply, portal):
         for name in HEADERS:
@@ -234,6 +231,16 @@ class ServerHeaderTests(AwsTestCase):
         self.assertIn("immutable", reply.headers["cache-control"])
         for path in ("/assets/vendor/nope.js", "/assets/vendor/..%2f..%2fstorage.py", "/assets/nope.js", "/assets/..%2fstorage.py"):
             self.assertEqual(self.portal.get(path).status_code, 404, path)
+
+    def test_the_company_logo_is_served_as_an_image_and_both_portals_show_it(self):
+        for client in (self.portal, self.hr):
+            reply = client.get("/assets/vendor/intensity-logo-v1.png")
+            self.assertEqual(reply.status_code, 200)
+            self.assertEqual(reply.headers["content-type"], "image/png")
+            self.assertTrue(reply.content.startswith(b"\x89PNG"))
+        self.assertIn("intensity-logo-v1.png", self.portal.get("/assets/index.app.js").text)
+        self.assertIn("intensity-logo-v1.png", self.hr.get("/assets/hr.app.js").text)
+        self.assertIn("intensity-logo-v1.png", self.hr.get("/login").text)
 
     def test_the_pages_are_never_cached(self):
         self.assertEqual(self.portal.get("/").headers["cache-control"], "no-store")

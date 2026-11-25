@@ -1,5 +1,5 @@
 """
-Compile the two pages' JavaScript and write static/dist/ (see assets.py). Run it after changing a page:
+Compile the two pages' JavaScript and write src/hr_onboarding/static/dist/ (see assets.py). Run it after changing a page:
 
     pip install mini-racer
     python scripts/build_assets.py
@@ -11,10 +11,10 @@ when mini-racer is installed; without it, a stale page stops the server with thi
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-import hr_info  # noqa: E402  (importing a portal builds its pages)
-import react_onboard  # noqa: E402
+from hr_onboarding import hr_portal  # noqa: E402  (importing a portal builds its pages)
+from hr_onboarding import employee_portal  # noqa: E402
 
-for name, built in (("onboard", react_onboard.ASSETS), ("hr", hr_info.ASSETS)):
+for name, built in (("onboard", employee_portal.ASSETS), ("hr", hr_portal.ASSETS)):
     print(name, ", ".join(f"{file} ({len(text) // 1024} KB)" for file, text in sorted(built.files.items())))

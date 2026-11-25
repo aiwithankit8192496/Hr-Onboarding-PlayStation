@@ -1,8 +1,8 @@
 """
 Rebuild the HR tables from the saved records.
 
-    python sync_tables.py                 rebuild the tables of every record in the configured storage
-    python sync_tables.py --from-local     first copy submissions/, forms/ and uploads/ from this
+    python scripts/sync_tables.py                 rebuild the tables of every record in the configured storage
+    python scripts/scripts/sync_tables.py --from-local     first copy submissions/, forms/ and uploads/ from this
                                            machine into the configured storage (e.g. S3), then rebuild
 
 Use --from-local once when moving to AWS (STORAGE_BACKEND=dynamodb_s3, S3_BUCKET=...). Safe to repeat:
@@ -10,9 +10,12 @@ with DynamoDB a record that is already there is kept as it is, never overwritten
 """
 
 import sys
+from pathlib import Path
 
-import hr_tables
-import storage
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+from hr_onboarding import hr_tables  # noqa: E402
+from hr_onboarding import storage  # noqa: E402
 
 
 def copy_local_into(target):

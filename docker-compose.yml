@@ -5,7 +5,7 @@
 #
 # Default is local mode: data goes to the folders next to this file (submissions/, forms/,
 # uploads/, hr_tables/), so your existing records show up. To use MongoDB + S3 as on AWS
-# (see DEPLOY_AWS.md), put these in .env:
+# (see docs/AWS_SETUP_GUIDE.md), put these in .env:
 #   STORAGE_BACKEND=mongo_s3  MONGODB_URI=...  S3_BUCKET=...  S3_PREFIX=onboarding/  AWS_REGION=...
 # and give the containers AWS credentials (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY).
 #
@@ -27,7 +27,7 @@ x-common: &common
 services:
   onboarding:
     <<: *common
-    command: python react_onboard.py
+    command: python -m hr_onboarding.employee_portal
     ports:
       - "8000:8000"
     environment:
@@ -36,7 +36,7 @@ services:
 
   hr:
     <<: *common
-    command: python hr_info.py
+    command: python -m hr_onboarding.hr_portal
     ports:
       - "8001:8001"
     environment:

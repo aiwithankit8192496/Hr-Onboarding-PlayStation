@@ -12,9 +12,8 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import hr_login
+from hr_onboarding import hr_login
 
 TEST_SCRYPT_N = 2 ** 4
 

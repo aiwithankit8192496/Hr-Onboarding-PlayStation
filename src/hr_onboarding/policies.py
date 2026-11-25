@@ -2,12 +2,12 @@
 Company policies the new employee signs during onboarding: the Employee NDA,
 the Statutory Declaration (SDF), the Anti-Bribery Policy and the HR Policy.
 
-react_onboard.py shows them as a "Policies" step. Each policy has two columns:
+employee_portal.py shows them as a "Policies" step. Each policy has two columns:
 the document on the left and the employee's form on the right. Name, PAN
 number, Aadhaar number and mobile number are shared with the Personal
 Information step, so the "Auto-fill details" button there fills them here too.
 
-Used by react_onboard.py:
+Used by employee_portal.py:
     PAYLOAD                 policy texts for the page (JSON)
     CSS, SCRIPT             styles and React components injected into the page
     validate_policies()     server-side checks before a submission is saved
@@ -300,7 +300,7 @@ def build_policy_record(data):
 
 
 # ==========================================================
-# 3. REACT FRONTEND (injected into react_onboard.PAGE)
+# 3. REACT FRONTEND (injected into employee_portal.PAGE)
 # ==========================================================
 
 CSS = r"""

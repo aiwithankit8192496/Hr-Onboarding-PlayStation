@@ -1,4 +1,4 @@
-﻿starlette
+starlette
 uvicorn
 python-multipart
 pillow

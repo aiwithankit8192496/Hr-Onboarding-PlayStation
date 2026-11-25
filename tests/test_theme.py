@@ -7,9 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-import theme
+from hr_onboarding import theme
 
 
 def served(module_name):
@@ -21,7 +19,7 @@ def served(module_name):
         except ImportError as error:
             raise unittest.SkipTest(f"{module_name} needs {error.name}")
 
-    return module.render_page() if module_name == "react_onboard" else module.theme.inject(module.PAGE)
+    return module.render_page() if module_name == "hr_onboarding.employee_portal" else module.theme.inject(module.PAGE)
 
 
 class ThemeInjectTests(unittest.TestCase):
@@ -55,16 +53,17 @@ class FrontendThemeTests(unittest.TestCase):
         self.assertIn("<ThemeToggle", page)
 
     def test_onboarding_portal(self):
-        self.check("react_onboard", "--surface:", "--bg:")
+        self.check("hr_onboarding.employee_portal", "--surface:", "--bg:")
 
     def test_hr_portal(self):
-        self.check("hr_info", "--card:", "--bg:")
+        self.check("hr_onboarding.hr_portal", "--card:", "--bg:")
 
     def test_no_light_only_white_backgrounds_left(self):
         # Surfaces must use a variable so they flip in dark mode
-        for module_name in ("react_onboard", "hr_info"):
+        for module_name in ("hr_onboarding.employee_portal", "hr_onboarding.hr_portal"):
             css = served(module_name).split("<style>")[1].split("</style>")[0]
-            allowed = ("lightbox img", "viewer-frame", "toggle")
+            # the company logo is an image on a white background: it keeps a white chip in dark mode too
+            allowed = ("lightbox img", "viewer-frame", "toggle", "-logo", ".logo")
             for line in css.splitlines():
                 if re.search(r"background:\s*#fff\b", line) and not any(name in line for name in allowed):
                     self.fail(f"{module_name}: hard-coded white background: {line.strip()[:100]}")

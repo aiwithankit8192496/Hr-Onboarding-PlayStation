@@ -5,10 +5,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-import hr_login
-import storage
+from hr_onboarding import hr_login
+from hr_onboarding import storage
 
 GOOD = {
     "STORAGE_BACKEND": "s3",

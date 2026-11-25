@@ -23,10 +23,11 @@ from pathlib import Path
 
 from starlette.responses import HTMLResponse, Response
 
-BASE_DIR = Path(__file__).resolve().parent
-VENDOR_DIR = BASE_DIR / "static" / "vendor"
-DIST_DIR = BASE_DIR / "static" / "dist"
-BABEL = BASE_DIR / "tools" / "babel-standalone-7.26.4.min.js"
+PACKAGE_DIR = Path(__file__).resolve().parent
+BASE_DIR = PACKAGE_DIR.parents[1]  # the project folder
+VENDOR_DIR = PACKAGE_DIR / "static" / "vendor"
+DIST_DIR = PACKAGE_DIR / "static" / "dist"
+BABEL = BASE_DIR / "scripts" / "vendor" / "babel-standalone-7.26.4.min.js"
 
 # CDN address in the page -> our own copy (served at /assets/vendor/<file>)
 VENDOR = {
@@ -43,7 +44,10 @@ BABEL_CDN = re.compile(r'<script src="https://unpkg\.com/@babel/standalone[^"]*"
 FONT_LINK = re.compile(r'<link[^>]*(?:fonts\.googleapis\.com|fonts\.gstatic\.com)[^>]*>\n?')
 EXTERNAL = re.compile(r'(?:src|href)="https?://')
 
-MEDIA_TYPES = {".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8"}
+MEDIA_TYPES = {
+    ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
+    ".png": "image/png",  # the company logo in static/vendor (never a page file in static/dist)
+}
 
 
 class AssetsOutOfDate(RuntimeError):

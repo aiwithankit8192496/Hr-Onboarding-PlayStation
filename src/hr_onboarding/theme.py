@@ -1,6 +1,6 @@
 """
 Light / dark / default colour theme shared by both frontends (the onboarding portal in
-react_onboard.py and the HR portal in hr_info.py).
+employee_portal.py and the HR portal in hr_portal.py).
 
 Default follows the device setting (prefers-color-scheme); Light and Dark are the user's own
 choice, kept in localStorage. The head script puts the result on <html data-theme="light|dark">

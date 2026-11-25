@@ -4,7 +4,7 @@ Bank details step of the onboarding portal: the employee uploads a bank proof
 relieving letter. The AI model reads them to fill the bank details, and the details
 are cross-checked against the PAN/Aadhaar information (name, address, DOB, PAN).
 
-Used by react_onboard.py:
+Used by employee_portal.py:
     extract_bank_documents()   /api/extract-bank: read documents + run checks
     read_uploads(), validate_uploads(), save_uploads()   files on submit
     validate_bank(), build_bank_record()                 form data on submit
@@ -253,7 +253,7 @@ def build_bank_record(data):
 
 
 # ==========================================================
-# 5. REACT FRONTEND (injected into react_onboard.PAGE)
+# 5. REACT FRONTEND (injected into employee_portal.PAGE)
 # ==========================================================
 
 CSS = r"""
@@ -279,7 +279,7 @@ CSS = r"""
 
 SCRIPT = r"""
 // ---------------------------------------------------------------
-// Bank details (from Bank_details.py)
+// Bank details (from bank_details.py)
 // ---------------------------------------------------------------
 
 const PAYSLIP_COUNT = 6;

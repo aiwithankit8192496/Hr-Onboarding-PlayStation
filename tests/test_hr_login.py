@@ -8,9 +8,8 @@ import time
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import hr_login
+from hr_onboarding import hr_login
 
 SECRET = "k" * 40
 
@@ -253,7 +252,7 @@ class TotpTests(unittest.TestCase):
         self.assertTrue(throttle.use_step("rahul", 100))  # per user
 
     def test_it_uses_no_network_and_nothing_outside_the_standard_library(self):
-        source = (Path(__file__).resolve().parent.parent / "hr_login.py").read_text(encoding="utf-8")
+        source = (Path(__file__).resolve().parent.parent / "src" / "hr_onboarding" / "hr_login.py").read_text(encoding="utf-8")
         for module in re.findall(r"^(?:import|from) (\w+)", source, re.M):
             self.assertIn(module, sys.stdlib_module_names, module)
         for forbidden in ("socket", "urllib.request", "http.client", "requests", "pyotp"):
@@ -264,14 +263,14 @@ class ScryptSettingsTests(unittest.TestCase):
     """The test run lowers scrypt for speed (conftest.py); production keeps and enforces the strong numbers."""
 
     def test_the_production_numbers_in_the_source_are_unchanged(self):
-        source = (Path(__file__).resolve().parent.parent / "hr_login.py").read_text(encoding="utf-8")
+        source = (Path(__file__).resolve().parent.parent / "src" / "hr_onboarding" / "hr_login.py").read_text(encoding="utf-8")
         self.assertIn("SCRYPT_N, SCRYPT_R, SCRYPT_P = 2 ** 14, 8, 1", source)
         self.assertIn("MIN_SCRYPT_N = 2 ** 14", source)
 
     def test_no_application_file_reads_a_test_setting(self):
-        root = Path(__file__).resolve().parent.parent
-        for name in ("hr_login.py", "hr_info.py", "storage.py", "react_onboard.py", "assets.py", "security_headers.py"):
-            text = (root / name).read_text(encoding="utf-8")
+        package = Path(__file__).resolve().parent.parent / "src" / "hr_onboarding"
+        for name in ("hr_login.py", "hr_portal.py", "storage.py", "employee_portal.py", "assets.py", "security_headers.py"):
+            text = (package / name).read_text(encoding="utf-8")
             for word in ("import pytest", "TEST_SCRYPT", "FAST_SCRYPT", "environ.get(\"SCRYPT", "environ.get(\"HR_SCRYPT"):
                 self.assertNotIn(word, text, name)
 

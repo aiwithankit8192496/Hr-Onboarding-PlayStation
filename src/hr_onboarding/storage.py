@@ -26,7 +26,7 @@ mongo_s3   (DEPRECATED: the earlier AWS design; kept only so scripts/migrate_mon
               counters: the atomic employee-ID counter, safe across any number of containers.
     S3        <S3_PREFIX>employees/<id>/documents/<file>   every upload, in that student's own folder
               <SHARED_TABLE_PREFIX><table>/<id>.parquet    the HR tables, one small file per employee
-                                                           per table (same schema as Data/sources_hr);
+                                                           per table (same schema as samples/hr_tables);
                                                            the bank and sensitive tables always use hr/<table>/
 
 s3         (no MongoDB: the records are JSON files in the student's S3 folder instead)
@@ -54,7 +54,7 @@ import time
 from decimal import Decimal
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[2]  # the project folder (.env and the local data folders live here)
 
 log = logging.getLogger("storage")
 
@@ -133,7 +133,7 @@ class LocalStore:
     def delete_document(self, employee_id, filename):
         (self.uploads / employee_id / filename).unlink(missing_ok=True)
 
-    # hr_tables/<table>.csv: all employees in one file, like Data/sources_hr
+    # hr_tables/<table>.csv: all employees in one file, like samples/hr_tables
     def read_rows(self, table, columns, employee_id):
         path = self.tables / f"{table}.csv"
         if not path.is_file():
@@ -654,7 +654,7 @@ class DynamoS3Store(S3Store):
             raise RecordNotFound("No claimed employee ID for this record.") from None
 
     def import_json(self, kind, employee_id, data):
-        """Add a record or form that already exists elsewhere (sync_tables.py --from-local).
+        """Add a record or form that already exists elsewhere (scripts/sync_tables.py --from-local).
 
         A conditional put: an item that is already here is left exactly as it is. Returns True when added.
         """
@@ -677,10 +677,10 @@ class DynamoS3Store(S3Store):
 
 
 # ==========================================================
-# 3. TABLE SCHEMAS (match Data/sources_hr/athena_tables.sql)
+# 3. TABLE SCHEMAS (match samples/hr_tables/athena_tables.sql)
 # ==========================================================
 
-# Kept in separate, restricted storage (see Data/sources_hr/README.md)
+# Kept in separate, restricted storage (see samples/hr_tables/README.md)
 RESTRICTED_TABLES = {"employee_bank_details", "employee_sensitive_details"}
 
 # The restricted tables keep their own folder; only the other tables follow SHARED_TABLE_PREFIX
@@ -784,7 +784,7 @@ def config_error(problems):
 def hr_login_problems():
     """Why the HR sign-in settings are unsafe (names the variables, never a value)."""
 
-    import hr_login
+    from hr_onboarding import hr_login
 
     problems = []
 
@@ -969,7 +969,7 @@ def save_record(record):
     the employee's submission is never lost; sync_tables.py rebuilds the tables from the records.
     """
 
-    import hr_tables
+    from hr_onboarding import hr_tables
 
     store = get_store()
     store.put_json("submission", record["employee_id"], record)

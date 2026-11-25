@@ -1,5 +1,5 @@
 """
-HR Review Portal: lets HR review every onboarding submission from react_onboard.py in
+HR Review Portal: lets HR review every onboarding submission from employee_portal.py in
 seven steps (identity, address and family, education, experience, bank, references and
 policies, decision). In each step the submitted details sit next to a viewer for the
 documents they came from (zoom, rotate, full screen), with a "Matches" tick and a flag for
@@ -10,7 +10,7 @@ or DynamoDB and S3 on AWS). Sign-in is a login form and a signed session cookie 
 HR_USERS (or HR_USER + HR_PASSWORD_HASH) and SESSION_SECRET to require it, and leave them unset only on a local machine.
 
 Run:
-    python hr_info.py
+    python hr_portal.py
 Then open http://localhost:8001
 """
 
@@ -32,12 +32,12 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
-import assets
-import hr_login
-import jsonlog
-import storage
-import theme
-from security_headers import SecurityHeaders
+from hr_onboarding import assets
+from hr_onboarding import hr_login
+from hr_onboarding import jsonlog
+from hr_onboarding import storage
+from hr_onboarding import theme
+from hr_onboarding.security_headers import SecurityHeaders
 
 jsonlog.setup()  # JSON log lines with the level and the employee ID only, never personal details
 log = logging.getLogger("hr")
@@ -47,7 +47,7 @@ log = logging.getLogger("hr")
 # 1. APPLICATION CONFIGURATION
 # ==========================================================
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[2]  # the project folder (.env and the local data folders live here)
 
 # Local folders or S3, chosen by STORAGE_BACKEND (see storage.py); .env is read first
 storage.load_env_file(BASE_DIR / ".env")
@@ -56,7 +56,7 @@ storage.check_config(require_hr_login=True)  # refuse to start on an unsafe S3 o
 HOST = os.environ.get("HOST", "127.0.0.1")  # 0.0.0.0 inside a container
 PORT = int(os.environ.get("PORT", "8001"))
 
-# Document key -> (label shown to HR, file type); keys match react_onboard.DOCUMENTS.
+# Document key -> (label shown to HR, file type); keys match employee_portal.DOCUMENTS.
 # "aadhaar" is kept for older submissions that uploaded a single Aadhaar image.
 DOCUMENTS = {
     "aadhaar_front": ("Aadhaar Card (Front)", "jpg"),
@@ -82,7 +82,7 @@ HR_DECISIONS = ("Pending", "Approved", "Rejected")
 # Applications from before these statuses were added were saved as "Pending HR Review"
 LEGACY_NEW = "Pending HR Review"
 
-# Where employees open the onboarding form (react_onboard.py); the flagged-application
+# Where employees open the onboarding form (employee_portal.py); the flagged-application
 # link HR shares is built from it. Set ONBOARDING_URL to the public address on AWS.
 ONBOARDING_URL = os.environ.get("ONBOARDING_URL", "http://127.0.0.1:8000").rstrip("/")
 
@@ -245,6 +245,25 @@ async def employee_document(request: Request):
         return JSONResponse({"error": "Document not found."}, status_code=404)
 
     return Response(content, media_type=MEDIA_TYPES[file_type])
+
+
+async def employee_photo(request: Request):
+    """The profile photograph's bytes, for the downloadable application page (HR session required)."""
+
+    employee_id = request.path_params["employee_id"]
+    filename = "photo." + DOCUMENTS["photo"][1]
+
+    if not EMPLOYEE_ID_PATTERN.fullmatch(employee_id):
+        return JSONResponse({"error": "Document not found."}, status_code=404)
+
+    content = storage.get_store().get_document(employee_id, filename)
+
+    if content is None:
+        return JSONResponse({"error": "Document not found."}, status_code=404)
+
+    jsonlog.set_employee(employee_id)
+    log.info("Photograph read for the application download")
+    return Response(content, media_type=MEDIA_TYPES[DOCUMENTS["photo"][1]], headers={"Cache-Control": "no-store"})
 
 
 async def update_status(request: Request):
@@ -525,6 +544,8 @@ body {
   border-radius: 12px;
   margin-bottom: 20px;
 }
+.hero-brand { display: flex; align-items: center; gap: 20px; }
+.hero-logo { display: block; height: 56px; width: auto; background: #fff; border-radius: 10px; padding: 5px 12px; box-sizing: border-box; flex: none; }
 .hero h1 { margin: 0 0 5px; font-size: 28px; }
 .hero p { margin: 0; color: #dce8ff; }
 .layout { display: grid; grid-template-columns: 330px minmax(0, 1fr); gap: 20px; align-items: start; }
@@ -656,6 +677,8 @@ summary { cursor: pointer; color: var(--primary); font-weight: 600; }
   .employee-list { max-height: 300px; }
   .info-grid, .doc-grid { grid-template-columns: 1fr; }
   .hero { flex-direction: column; align-items: flex-start; }
+  .hero-brand { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .hero-logo { height: 46px; }
   .hero h1 { font-size: 22px; }
 }
 
@@ -826,7 +849,7 @@ async function request(url, options) {
   try {
     response = await fetch(url, await withBodyHash(options));
   } catch {
-    throw new Error("Could not reach the server. Is hr_info.py still running?");
+    throw new Error("Could not reach the server. Is hr_portal.py still running?");
   }
   // The 8-hour sign-in ended: back to the login form
   if (response.status === 401 && AUTH_ON) { location.href = "/login"; throw new Error("Please sign in again."); }
@@ -848,6 +871,150 @@ function formatDateTime(iso) {
 function StatusBadge({ status }) {
   return <span className={`badge ${STATUS_CLASS[status] || "pending"}`}>{status}</span>;
 }
+
+const escapeHtml = (value) =>
+  String(value ?? "").replace(/[&<>"']/g, (char) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]
+  );
+
+// A standalone, printable HTML page with everything the employee submitted
+function applicationPage(record, photoUrl, documentLabels) {
+  const personal = record.personal_information || {};
+  const emergency = personal.emergency_contact || {};
+  const address = record.address || {};
+  const professional = record.professional_details || {};
+  const job = professional.employment_history || {};
+  const references = record.references || {};
+
+  const info = (label, value, wide) =>
+    `<div class="info${wide ? " wide" : ""}"><span>${escapeHtml(label)}</span>` +
+    `<strong>${escapeHtml(value === "" || value == null ? "—" : value)}</strong></div>`;
+  const grid = (...items) => `<div class="grid">${items.join("")}</div>`;
+  const section = (title, body) => `<section><h2>${escapeHtml(title)}</h2>${body}</section>`;
+  const table = (rows) =>
+    rows && rows.length
+      ? `<table><thead><tr>${Object.keys(rows[0]).map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr></thead>` +
+        `<tbody>${rows.map((row) => `<tr>${Object.values(row).map((value) => `<td>${escapeHtml(value || "—")}</td>`).join("")}</tr>`).join("")}</tbody></table>`
+      : `<p class="muted">None provided.</p>`;
+
+  const submitted = record.submitted_at ? new Date(record.submitted_at).toLocaleString("en-IN") : "";
+  const seniors = ["senior_1", "senior_2"].map((key) => references[key] || {});
+
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Onboarding - ${escapeHtml(record.employee_id)}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6fb; color: #0f172a; font: 14px/1.5 "Segoe UI", system-ui, sans-serif; }
+  .page { max-width: 900px; margin: 24px auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; }
+  header { display: flex; gap: 20px; align-items: center; padding: 28px 32px; background: #0f172a; color: #fff; }
+  header img { width: 96px; height: 120px; object-fit: cover; border-radius: 10px; border: 3px solid rgba(255,255,255,.2); }
+  header h1 { margin: 0 0 4px; font-size: 24px; }
+  header p { margin: 2px 0; color: #cbd5e1; }
+  .id { display: inline-block; margin-top: 8px; padding: 4px 12px; border-radius: 8px; background: rgba(255,255,255,.12); font: 600 15px ui-monospace, Consolas, monospace; letter-spacing: .04em; }
+  section { padding: 22px 32px; border-top: 1px solid #e2e8f0; }
+  h2 { margin: 0 0 14px; font-size: 15px; color: #4338ca; text-transform: uppercase; letter-spacing: .05em; }
+  h3 { margin: 18px 0 10px; font-size: 13.5px; color: #334155; }
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 20px; }
+  .info { display: flex; flex-direction: column; min-width: 0; }
+  .info.wide { grid-column: 1 / -1; }
+  .info span { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: #64748b; }
+  .info strong { font-weight: 500; overflow-wrap: anywhere; white-space: pre-wrap; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 8px; background: #f8fafc; color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid #e2e8f0; }
+  td { padding: 8px; border-bottom: 1px solid #e2e8f0; }
+  .muted { color: #64748b; margin: 0; }
+  .docs { display: flex; flex-wrap: wrap; gap: 8px; }
+  .docs span { padding: 5px 10px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 13px; }
+  .declaration { color: #065f46; background: #ecfdf5; border: 1px solid #a7f3d0; padding: 10px 14px; border-radius: 10px; margin: 0; }
+  @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } header { flex-direction: column; align-items: flex-start; } section, header { padding: 18px; } }
+  @media print { body { background: #fff; } .page { margin: 0; border: none; border-radius: 0; } section { break-inside: avoid; } }
+</style></head>
+<body><div class="page">
+<header>
+  ${photoUrl ? `<img src="${photoUrl}" alt="Employee photograph">` : ""}
+  <div>
+    <h1>${escapeHtml(personal.name)}</h1>
+    <p>Employee Onboarding Application</p>
+    <p>Status: ${escapeHtml(record.application_status)}${submitted ? ` · Submitted ${escapeHtml(submitted)}` : ""}</p>
+    <span class="id">${escapeHtml(record.employee_id)}</span>
+  </div>
+</header>
+${section("Personal Information", grid(
+  info("Full Name", personal.name),
+  info("Father's Name", personal.father_name),
+  info("Date of Birth", personal.date_of_birth),
+  info("Age", personal.age),
+  info("Gender", personal.gender),
+  info("PAN Number", personal.pan_number),
+  info("Aadhaar Number", personal.aadhaar_number),
+  info("Mobile Number", personal.mobile),
+  info("Passport Number", personal.passport_number),
+  info("Personal Email", personal.email),
+  info("Languages Known", personal.languages),
+  info("Hobbies and Interests", personal.hobbies),
+) + "<h3>Address</h3>" + grid(
+  info("Permanent Address", address.permanent_address, true),
+  info("Current Address", address.current_address, true),
+) + "<h3>Emergency Contact</h3>" + grid(
+  info("Name", emergency.name),
+  info("Relation", emergency.relation),
+  info("Phone Number", emergency.phone),
+))}
+${section("Family Details", table(record.family_details))}
+${section("Education", table(record.education_details))}
+${section("Professional Experience", grid(
+  info("Total Experience (Years)", professional.total_experience),
+  info("Last Organisation", job.organisation),
+  info("Period", `${(job.period || {}).from || "—"} to ${(job.period || {}).to || "—"}`),
+  info("Designation at Joining", (job.designation || {}).at_joining),
+  info("Last Position Held", (job.designation || {}).last_position_held),
+  info("Gross Salary at Joining", (job.gross_salary_drawn || {}).at_joining),
+  info("Gross Salary Last Drawn", (job.gross_salary_drawn || {}).last_drawn),
+  info("Job Responsibility", job.job_responsibility, true),
+  info("Reason for Leaving", job.reason_for_leaving, true),
+))}
+${section("References", seniors.map((senior, index) =>
+  `<h3>Senior Reference ${index + 1}</h3>` + grid(
+    info("Full Name", senior.name),
+    info("Designation", senior.designation),
+    info("Contact Number", senior.contact),
+  )).join(""))}
+${section("Documents Uploaded", `<div class="docs">${Object.keys(record.documents || {})
+  .map((key) => `<span>✓ ${escapeHtml(documentLabels[key] || key)}</span>`).join("")}</div>`)}
+${record.bank_details ? section("Bank Details", grid(
+  info("Account Holder", record.bank_details.account_holder),
+  info("Account Number", record.bank_details.account_number),
+  info("IFSC Code", record.bank_details.ifsc),
+  info("Bank Name", record.bank_details.bank_name),
+  info("Branch Address", record.bank_details.branch_address, true),
+  info("Current Address", record.bank_details.current_address, true),
+)) : ""}
+${record.policies ? section("Company Policies", grid(
+  info("Designation Offered", record.policies.designation),
+  info("E-signature", record.policies.signature),
+  info("Signed On", record.policies.signed_on),
+) + `<h3>Accepted</h3><div class="docs">${Object.values(record.policies.accepted || {})
+  .map((policy) => `<span>✓ ${escapeHtml(policy.title)}</span>`).join("")}</div>` +
+  "<h3>Statutory Declaration</h3>" +
+  table(Object.entries((record.policies.statutory_declaration || {}).answers || {})
+    .map(([point, answer]) => ({ Point: point, Answer: answer }))) +
+  ((record.policies.statutory_declaration || {}).details
+    ? grid(info("Details", record.policies.statutory_declaration.details, true))
+    : "")
+) : ""}
+${section("Declaration", `<p class="declaration">✓ The employee confirmed that all the information provided is correct and complete.</p>`)}
+</div></body></html>`;
+}
+
+const readBlobAsDataUrl = (blob) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
 
 function DataTable({ rows, rowStatus }) {
   if (!rows || !rows.length) return <p className="caption">Not provided.</p>;
@@ -1438,12 +1605,21 @@ function EmployeeDetail({ detail, onStatusChange, onRequestChanges, onSaveVerifi
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
-  const downloadJson = () => {
-    const blob = new Blob([JSON.stringify(record, null, 4)], { type: "application/json" });
+  // The same standalone, printable page the employee can download, built from the saved record
+  const downloadApplication = async () => {
+    let photoUrl = null;
+    if (photo) {
+      try {
+        const response = await fetch(`/api/employees/${encodeURIComponent(record.employee_id)}/photo`);
+        if (response.ok) photoUrl = await readBlobAsDataUrl(await response.blob());
+      } catch (error) { /* the page is still complete without the photograph */ }
+    }
+    const labels = Object.fromEntries(documents.map((item) => [item.key, item.label]));
+    const blob = new Blob([applicationPage(record, photoUrl, labels)], { type: "text/html" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${record.employee_id}.json`;
+    link.download = `${record.employee_id}-onboarding-form.html`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -1590,7 +1766,7 @@ function EmployeeDetail({ detail, onStatusChange, onRequestChanges, onSaveVerifi
           <button type="button" className="btn neutral" disabled={updating} onClick={() => onStatusChange("Pending")}>⏸ Mark as Pending</button>
         )}
         {draftList.length > 0 && <button type="button" className="btn neutral" onClick={() => setDrafts({})}>Discard flags</button>}
-        <button type="button" className="btn neutral" onClick={downloadJson}>⬇ Download Record</button>
+        <button type="button" className="btn neutral" onClick={downloadApplication}>⬇ Download Application</button>
       </div>
 
       {detail.application_link && (
@@ -1830,9 +2006,12 @@ function App() {
   return (
     <div className="page">
       <header className="hero">
-        <div>
-          <h1>🗂️ HR Review Portal</h1>
-          <p>Review each submission step by step, with the details next to the document they come from.</p>
+        <div className="hero-brand">
+          <img className="hero-logo" src="/assets/vendor/intensity-logo-v1.png" width="169" height="56" alt="Intensity: You First. Great Place To Work Certified 2026, India" />
+          <div>
+            <h1>HR Review Portal</h1>
+            <p>Review each submission step by step, with the details next to the document they come from.</p>
+          </div>
         </div>
         <div className="hero-actions">
           <ThemeToggle onDark />
@@ -2069,6 +2248,7 @@ LOGIN_PAGE = r"""<!doctype html>
   html, body { height: 100%; margin: 0; }
   body { display: flex; align-items: center; justify-content: center; padding: 16px; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   form { width: 100%; max-width: 360px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 28px 24px; display: flex; flex-direction: column; gap: 14px; }
+  .logo { display: block; align-self: center; height: 60px; width: auto; background: #fff; border-radius: 10px; padding: 4px 10px; box-sizing: border-box; }
   h1 { margin: 0; font-size: 20px; }
   p { margin: 0; color: var(--muted); font-size: 14px; }
   label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; font-weight: 600; }
@@ -2081,6 +2261,7 @@ LOGIN_PAGE = r"""<!doctype html>
 </head>
 <body>
 <form id="form" autocomplete="on">
+  <img class="logo" src="/assets/vendor/intensity-logo-v1.png" width="181" height="60" alt="Intensity: You First">
   <h1>HR Review Portal</h1>
   <p>Sign in to review onboarding applications. Enter the 6-digit code from your authenticator app.</p>
   <label>User name <input name="user" id="user" autocomplete="username" required autofocus></label>
@@ -2143,6 +2324,7 @@ app = Starlette(
         Route("/api/employees", employees),
         Route("/api/employees/{employee_id}", employee_detail),
         Route("/api/employees/{employee_id}/documents/{document}", employee_document),
+        Route("/api/employees/{employee_id}/photo", employee_photo),
         Route("/api/employees/{employee_id}/status", update_status, methods=["POST"]),
         Route("/api/employees/{employee_id}/flags", request_changes, methods=["POST"]),
         Route("/api/employees/{employee_id}/verification", save_verification, methods=["POST"]),

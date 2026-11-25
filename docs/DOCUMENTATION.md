@@ -2,8 +2,8 @@
 
 An employee onboarding system with two web apps:
 
-- **Employee portal** (`react_onboard.py`, port 8000): a 4-step form where the employee uploads their resume, Aadhaar, PAN, photo and other documents, and an AI model reads the text from them to fill the form.
-- **HR portal** (`hr_info.py`, port 8001): HR reviews every submission and its documents, can **flag** anything that is wrong, and approves, rejects or keeps it pending.
+- **Employee portal** (`employee_portal.py`, port 8000): a 4-step form where the employee uploads their resume, Aadhaar, PAN, photo and other documents, and an AI model reads the text from them to fill the form.
+- **HR portal** (`hr_portal.py`, port 8001): HR reviews every submission and its documents, can **flag** anything that is wrong, and approves, rejects or keeps it pending.
 
 Both are Python (Starlette + Uvicorn) servers that serve a React page. There is no database: records are JSON files and documents are files on disk.
 
@@ -15,15 +15,15 @@ Both are Python (Starlette + Uvicorn) servers that serve a React page. There is 
 
 | File | Role |
 |---|---|
-| `react_onboard.py` | Employee portal: backend (AI calls, validation, saving) and the React form, all in one file |
-| `hr_info.py` | HR portal: list, review, flags, status decisions |
-| `Bank_details.py` | Bank step: the AI model reads cheque/payslip/relieving letter, cross-checks them against PAN/Aadhaar; also its React components |
-| `policies.py` | The 4 company policies, the statutory declaration questions, e-signature validation; also its React components |
+| `src/hr_onboarding/employee_portal.py` | Employee portal: backend (AI calls, validation, saving) and the React form, all in one file |
+| `src/hr_onboarding/hr_portal.py` | HR portal: list, review, flags, status decisions |
+| `src/hr_onboarding/bank_details.py` | Bank step: the AI model reads cheque/payslip/relieving letter, cross-checks them against PAN/Aadhaar; also its React components |
+| `src/hr_onboarding/policies.py` | The 4 company policies, the statutory declaration questions, e-signature validation; also its React components |
 | `.env` | `GEMINI_API_KEY` and `GEMMA_MODEL` (not committed; listed in `.gitignore`) |
 | `submissions/<id>.json` | The saved application record (what HR sees) |
 | `forms/<id>.json` | The form exactly as the employee submitted it (used to reopen it after a flag) |
 | `uploads/<id>/` | The employee's uploaded documents |
-| `Data/` | Original document templates (joining form, NDA, statutory declaration) |
+| `docs/reference/` | Original document templates (joining form, NDA, statutory declaration) |
 
 ---
 
@@ -39,7 +39,7 @@ Both are Python (Starlette + Uvicorn) servers that serve a React page. There is 
 | Auth | API key in the `x-goog-api-key` header, read from `GEMINI_API_KEY` |
 | Switching model | change `GEMMA_MODEL` in `.env` and restart |
 
-The code lives in `gemini_generate()` and `ask_model()` in `react_onboard.py`. The first sends one request; the second turns the JSON reply into a clean dictionary of the fields wanted.
+The code lives in `gemini_generate()` and `ask_model()` in `employee_portal.py`. The first sends one request; the second turns the JSON reply into a clean dictionary of the fields wanted.
 
 ### Parameters sent with every request
 
@@ -209,7 +209,7 @@ Rules:
 
 ## 5. Important components
 
-### `react_onboard.py` (backend)
+### `employee_portal.py` (backend)
 | Function | Purpose |
 |---|---|
 | `load_env_file` | reads `.env` into environment variables |
@@ -224,7 +224,7 @@ Rules:
 | `load_application`, `application`, `application_document` | the employee's private link: token check, form and document access |
 | `PAGE` | the React front end as one string; sections for fields, uploads (with cropper), stepper, review, draft saving, flag notes |
 
-### `hr_info.py`
+### `hr_portal.py`
 | Function | Purpose |
 |---|---|
 | `load_record`, `save_record` | read and write a submission (maps the old "Pending HR Review" status to New) |
@@ -233,7 +233,7 @@ Rules:
 | `request_changes` | saves HR's flags and sets Changes Requested |
 | `PAGE` | React front end: sidebar list with filters, detail view, `FlagControl` for flagging |
 
-### `Bank_details.py` and `policies.py`
+### `bank_details.py` and `policies.py`
 - `extract_bank_documents` reads the three bank documents in parallel; `verify` builds the 8 checks (account holder, bank address, payslip name / PAN / DOB, relieving letter name / organisation, last working day).
 - `validate_bank` checks account number and IFSC only if filled; `build_bank_record` stores the values and a fresh verification.
 - `validate_policies` checks designation, statutory answers, acceptance of all 4 policies and the e-signature; `build_policy_record` stores what was signed and when.
@@ -284,10 +284,10 @@ Each flag: `id`, `key` (the form field or document), `label`, `note`, `raised_at
    GEMMA_MODEL=gemma-4-26b-a4b-it
    ```
 2. Install what the code uses: `starlette`, `uvicorn`, `pillow`, `pypdfium2` (the Python standard library covers the rest).
-3. Start both apps from the project folder:
+3. Start both apps from the project folder (set `PYTHONPATH=src` and `STORAGE_BACKEND=local` first):
    ```powershell
-   python react_onboard.py   # employee portal, http://localhost:8000
-   python hr_info.py         # HR portal,       http://localhost:8001
+   python -m hr_onboarding.employee_portal   # employee portal, http://localhost:8000
+   python -m hr_onboarding.hr_portal         # HR portal,       http://localhost:8001
    ```
 4. Restart an app after changing its code; the page is built once when the server starts.
 

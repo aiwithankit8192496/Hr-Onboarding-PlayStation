@@ -1,5 +1,5 @@
 """
-Turn an onboarding record into rows of the HR tables in Data/sources_hr
+Turn an onboarding record into rows of the HR tables in samples/hr_tables
 (employees, employee_education, employee_bank_details, employee_sensitive_details) and
 keep them in step with the record: called on every save, including HR's decisions and flags.
 
@@ -12,7 +12,7 @@ them: a resave only overwrites the columns built below.
 import datetime
 import re
 
-from storage import TABLE_SCHEMAS
+from hr_onboarding.storage import TABLE_SCHEMAS
 
 
 def iso_date(text):

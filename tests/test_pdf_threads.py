@@ -3,7 +3,7 @@ import sys
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent / "src"
 
 # Run in a child process: when pdfium is hit from two threads at once it corrupts the heap and
 # kills the whole process (this is what took the onboarding server down on "Fetch bank details")
@@ -12,7 +12,7 @@ import io, sys
 from concurrent.futures import ThreadPoolExecutor
 sys.path.insert(0, sys.argv[1])
 import pypdfium2
-import react_onboard
+from hr_onboarding import employee_portal
 
 def make_pdf(size):
     pdf = pypdfium2.PdfDocument.new()
@@ -24,8 +24,8 @@ def make_pdf(size):
 payslip, letter = make_pdf(595), make_pdf(612)
 
 def work(pdf):
-    assert react_onboard.pdf_to_images(pdf, max_pages=1)
-    react_onboard.pdf_text(pdf, max_pages=1)
+    assert employee_portal.pdf_to_images(pdf, max_pages=1)
+    employee_portal.pdf_text(pdf, max_pages=1)
 
 with ThreadPoolExecutor(max_workers=4) as pool:
     list(pool.map(work, [payslip, letter] * 100))

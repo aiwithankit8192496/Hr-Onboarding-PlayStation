@@ -2,8 +2,8 @@
 #
 #   AWS Lambda   the AWS Lambda Web Adapter (copied in below) forwards each invocation to the web
 #                server on PORT. One image, two functions; each function sets its own command:
-#                  hr-onboarding-portal:  python react_onboard.py   PORT=8000
-#                  hr-onboarding-hr:      python hr_info.py        PORT=8001
+#                  hr-onboarding-portal:  python -m hr_onboarding.employee_portal   PORT=8000
+#                  hr-onboarding-hr:      python -m hr_onboarding.hr_portal        PORT=8001
 #   Anywhere else (a laptop, docker compose, a server): the extension is not used; the same
 #                command starts the same uvicorn server.
 #
@@ -29,14 +29,12 @@ FROM ${ADAPTER_IMAGE} AS adapter
 FROM --platform=$BUILDPLATFORM ${PYTHON_IMAGE} AS assets
 
 WORKDIR /build
-COPY requirements-aws.txt requirements-build.txt ./
-RUN pip install --no-cache-dir -r requirements-aws.txt -r requirements-build.txt
+COPY requirements/runtime.txt requirements/build.txt requirements/
+RUN pip install --no-cache-dir -r requirements/runtime.txt -r requirements/build.txt
 
-COPY react_onboard.py hr_info.py Bank_details.py policies.py theme.py jsonlog.py hr_login.py storage.py \
-     hr_tables.py sync_tables.py assets.py security_headers.py ./
+COPY src src
 COPY scripts/build_assets.py scripts/build_assets.py
-COPY tools tools
-COPY static/vendor static/vendor
+COPY scripts/vendor scripts/vendor
 RUN python scripts/build_assets.py
 
 
@@ -51,13 +49,13 @@ COPY --from=adapter /lambda-adapter /opt/extensions/lambda-adapter
 
 WORKDIR /app
 
-COPY requirements-aws.txt .
-RUN pip install --no-cache-dir -r requirements-aws.txt
+COPY requirements/runtime.txt requirements/
+RUN pip install --no-cache-dir -r requirements/runtime.txt
 
-COPY react_onboard.py hr_info.py Bank_details.py policies.py theme.py jsonlog.py hr_login.py storage.py \
-     hr_tables.py sync_tables.py assets.py security_headers.py ./
-COPY static/vendor static/vendor
-COPY --from=assets /build/static/dist static/dist
+# The code is the hr_onboarding package under src/ (not installed, put on the import path)
+ENV PYTHONPATH=/app/src
+COPY src src
+COPY --from=assets /build/src/hr_onboarding/static/dist src/hr_onboarding/static/dist
 
 # Not root. The data folders exist so local mode (STORAGE_BACKEND=local) can write to them.
 RUN useradd --create-home --uid 1000 app \
@@ -79,4 +77,4 @@ EXPOSE 8000 8001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD python -c "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/health' % os.environ.get('PORT','8000'), timeout=4)"
 
-CMD ["python", "react_onboard.py"]
+CMD ["python", "-m", "hr_onboarding.employee_portal"]

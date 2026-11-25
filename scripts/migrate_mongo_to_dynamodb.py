@@ -25,9 +25,9 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-import storage  # noqa: E402
+from hr_onboarding import storage  # noqa: E402
 
 ID_NUMBER = re.compile(r"IGTPL(\d+)")
 

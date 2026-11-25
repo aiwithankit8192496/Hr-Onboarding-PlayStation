@@ -11,7 +11,7 @@ from pathlib import Path
 
 from py_mini_racer import MiniRacer
 
-FOLDER = Path(__file__).resolve().parent.parent / "cloudfront"
+FOLDER = Path(__file__).resolve().parent.parent / "deploy" / "cloudfront"
 IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
 
 

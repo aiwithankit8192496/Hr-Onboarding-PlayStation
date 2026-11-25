@@ -1,6 +1,6 @@
 # AWS Setup Guide: HR Onboarding (Serverless: Lambda, DynamoDB, S3, CloudFront, Company IAM User)
 
-Written for someone new to AWS who has been given a **company IAM user** (not the root account). It matches this project's code (`Dockerfile`, `storage.py`, `jsonlog.py`, `react_onboard.py`, `hr_info.py`, `hr_tables.py`, `sync_tables.py`, `scripts/migrate_mongo_to_dynamodb.py`, `hr_login.py`, `cloudfront/portal-viewer-request.js`, `cloudfront/hr-viewer-request.js`).
+Written for someone new to AWS who has been given a **company IAM user** (not the root account). It matches this project's code (`Dockerfile`, `storage.py`, `jsonlog.py`, `employee_portal.py`, `hr_portal.py`, `hr_tables.py`, `sync_tables.py`, `scripts/migrate_mongo_to_dynamodb.py`, `hr_login.py`, `deploy/cloudfront/portal-viewer-request.js`, `deploy/cloudfront/hr-viewer-request.js`).
 
 **What this version is**
 
@@ -12,7 +12,7 @@ Written for someone new to AWS who has been given a **company IAM user** (not th
   - **S3** holds the uploaded documents in each employee's own folder `onboarding/employees/<ID>/documents/` (your private documents bucket), the bank and sensitive tables (your private restricted bucket), and the two shared HR tables `employees/` and `employee_education/` in your colleague's analytics bucket. **The browser uploads each file straight to S3** with a pre-signed link (into a waiting folder, `onboarding/pending/<random id>/`), so the files never pass through Lambda. The employee ID is claimed only when the application is submitted.
 - **Privacy first.** PAN, Aadhaar, bank, phone, address and the scans are encrypted, locked to two roles, logged, and never written to log files (Part 7.2 is the full privacy section).
 - **Logging and alerts come first (Part 3)**, before any employee data exists. When something breaks, go straight to **Part 9**.
-- The earlier design (one EC2 server, MongoDB Atlas) is archived in `archive/AWS_SETUP_GUIDE_EC2_MongoDB.md`. MongoDB is gone from this guide except the one-time data move in Step 20.
+- The earlier design (one EC2 server, MongoDB Atlas) was removed from the project; it is in the git history (commit `18bb9f3`, folder `archive/`). MongoDB is gone from this guide except the one-time data move in Step 20.
 
 **About prices in this guide**
 
@@ -307,7 +307,7 @@ Also ask the administrator these questions, and write down the answers:
 | kms-disable | `{ $.eventName = "DisableKey" || $.eventName = "ScheduleKeyDeletion" }` | Encryption key at risk |
 
 **App alarms** (after Step 17, when the functions exist):
-- **`portal-errors`**: a metric filter on the **Lambda log group `/aws/lambda/hr-onboarding-portal`** with the pattern `{ $.levelname = "ERROR" }` and an alarm at **5 matches in 5 minutes**. The app logs a failed table write and keeps the submission, so this alarm tells you to run `python sync_tables.py`. Make a second one for `/aws/lambda/hr-onboarding-hr`.
+- **`portal-errors`**: a metric filter on the **Lambda log group `/aws/lambda/hr-onboarding-portal`** with the pattern `{ $.levelname = "ERROR" }` and an alarm at **5 matches in 5 minutes**. The app logs a failed table write and keeps the submission, so this alarm tells you to run `python scripts/sync_tables.py`. Make a second one for `/aws/lambda/hr-onboarding-hr`.
   - **A metric filter can only find the word ERROR if the level is printed in every log line.** In a plain Python log format that means **`%(levelname)s`** must be part of the format. The app's JSON lines already carry a **`levelname`** field, which is what the pattern above matches. If you ever see an alarm that never fires, open one log line and check that the level is there.
 - **`lambda-errors`**: CloudWatch → Alarms → Create alarm → Select metric → **Lambda → By Function Name → `Errors`** for each function, `Sum` ≥ 1 over 5 minutes. Set **treat missing data as "not breaching"** (the functions are idle at night).
 - **Do not alarm on `Throttles`.** The night switch makes every request a throttle on purpose (Step 19).
@@ -439,7 +439,7 @@ aws s3api put-bucket-logging --bucket <BUCKET_RESTRICTED> --bucket-logging-statu
 1. **Which AWS account owns it?** Same account as yours: only the roles' own policies (Step 15) are needed. A **different** account: they must also add the bucket policy below.
 2. **Which region?** `aws s3api get-bucket-location --bucket igtl-hr-analytics-ayush-2026`. Use that as `<REGION>` for everything.
 3. **How is it encrypted?** SSE-S3 works as it is (leave `S3_KMS_KEY_ID` empty). If it uses their own KMS key, they must allow your two function roles in that key's policy, and you set `S3_KMS_KEY_ID` to it.
-4. **Is "Bucket owner enforced" on** (the S3 default)? Then the files you write belong to them and their Athena can read them. Also ask: **do the Athena tables from `Data/sources_hr/athena_tables.sql` already exist on this bucket?** (Step 20 depends on it.)
+4. **Is "Bucket owner enforced" on** (the S3 default)? Then the files you write belong to them and their Athena can read them. Also ask: **do the Athena tables from `samples/hr_tables/athena_tables.sql` already exist on this bucket?** (Step 20 depends on it.)
 
 If the bucket is in a **different account**, send them this to add to the bucket policy (fill in `YOUR_ACCOUNT_ID`), plus a second statement allowing `s3:ListBucket` on `arn:aws:s3:::igtl-hr-analytics-ayush-2026` for the same role:
 ```json
@@ -468,7 +468,7 @@ This is written by the code (`storage.py`, `hr_tables.py`). Do not change the ke
   - `onboarding/employees/IGTPL007/documents/` is that employee's own folder: `pan.jpg`, `aadhaar_front.jpg`, `aadhaar_back.jpg`, `photo.jpg`, `resume.pdf`, `education_certificate.pdf`, `bank_proof.jpg`, `payslip_N.pdf`, `relieving_letter.pdf`. **The browser first puts each file in a waiting folder**, `onboarding/pending/<random id>/<name>`, with a pre-signed link that names exactly one key, works for 5 minutes, allows 1 byte to 5 MB, only the right type (`image/jpeg` or `application/pdf`), and forces SSE-S3 encryption. **When the application is submitted** the files are checked, the ID is claimed and each file is **copied** into the employee's folder. A lifecycle rule removes everything under `pending/` after one day.
   - `athena-results/` holds Athena query output (auto-deleted after 30 days).
 - **The shared bucket `igtl-hr-analytics-ayush-2026`** (your colleague's, you only add files)
-  - `employees/IGTPL007.parquet` and `employee_education/IGTPL007.parquet` (top level, no `hr/` prefix): one small file per employee per table, same columns as `Data/sources_hr/athena_tables.sql`. Written when the employee submits, updated when HR approves, rejects or flags. Columns that HR fills in later (`department`, `work_email`, `manager_id` ...) are never overwritten by the app. These are the tables HR and Athena read.
+  - `employees/IGTPL007.parquet` and `employee_education/IGTPL007.parquet` (top level, no `hr/` prefix): one small file per employee per table, same columns as `samples/hr_tables/athena_tables.sql`. Written when the employee submits, updated when HR approves, rejects or flags. Columns that HR fills in later (`department`, `work_email`, `manager_id` ...) are never overwritten by the app. These are the tables HR and Athena read.
 - **Your restricted bucket `<BUCKET_RESTRICTED>`**
   - `hr/employee_bank_details/IGTPL007.parquet`
   - `hr/employee_sensitive_details/IGTPL007.parquet` (PAN, Aadhaar, phone, account numbers)
@@ -498,7 +498,7 @@ This guide builds **Option A**. The table shows what you give up or gain with th
 
 **Why NAT is no longer needed.** NAT gives private containers one fixed outbound address. Here (1) DynamoDB, S3 and SSM are reached through IAM, not an address list, and (2) the only outside service, **Gemini, needs no fixed IP** (it uses the API key). So the functions run outside any VPC and have no NAT at all.
 
-**If you ever need B, C or D** (a client that wants a fixed server, or fixed container capacity): they are not built in this guide. The EC2 + MongoDB version is archived in `archive/AWS_SETUP_GUIDE_EC2_MongoDB.md`, and the code still runs in a container anywhere (`docker run` with `STORAGE_BACKEND=dynamodb_s3`, or `local` for a laptop). `docker-compose.aws.yml`, `Caddyfile` and `DEPLOY_AWS.md` describe Option B.
+**If you ever need B, C or D** (a client that wants a fixed server, or fixed container capacity): they are not built in this guide. The EC2 + MongoDB version was removed from the project (git history, commit `18bb9f3`: `archive/`, `Caddyfile`, `docker-compose.aws.yml`, `DEPLOY_AWS.md`), and the code still runs in a container anywhere (`docker run` with `STORAGE_BACKEND=dynamodb_s3`, or `local` for a laptop; `docker-compose.yml` starts both portals on one machine).
 
 ---
 
@@ -729,11 +729,11 @@ aws lambda create-function --function-name hr-onboarding-portal \
   --package-type Image --code ImageUri=<ECR_URI>:v1 --architectures arm64 \
   --role arn:aws:iam::<ACCOUNT_ID>:role/hr-onboarding-portal-role \
   --memory-size 1024 --timeout 60 \
-  --image-config '{"Command":["python","react_onboard.py"]}' \
+  --image-config '{"Command":["python","-m","hr_onboarding.employee_portal"]}' \
   --logging-config LogFormat=Text,LogGroup=/aws/lambda/hr-onboarding-portal \
   --environment 'Variables={STORAGE_BACKEND=dynamodb_s3,PORT=8000,AWS_REGION=<REGION>,S3_BUCKET=igtl-hr-analytics-ayush-2026,S3_DOCUMENTS_BUCKET=igtpl-hr-onboarding-docs-2026,S3_RESTRICTED_BUCKET=igtpl-hr-onboarding-restricted-2026,S3_PREFIX=onboarding/,DDB_APPLICATIONS_TABLE=hr-onboarding-applications,DDB_FORMS_TABLE=hr-onboarding-forms,DDB_COUNTERS_TABLE=hr-onboarding-counters,SSM_PARAMETER_PREFIX=/hr-onboarding/portal/,SSM_PARAMETER_NAMES=GEMINI_API_KEY,LOG_LEVEL=INFO}'
 ```
-**17b. The HR portal**: the same, with `--function-name hr-onboarding-hr`, `--role .../hr-onboarding-hr-role`, `--image-config '{"Command":["python","hr_info.py"]}'`, log group `/aws/lambda/hr-onboarding-hr`, and these variables: `PORT=8001`, `SSM_PARAMETER_PREFIX=/hr-onboarding/hr/`, `SSM_PARAMETER_NAMES=HR_USERS,SESSION_SECRET`, `ONBOARDING_URL=https://<ONBOARDING_DOMAIN>` (and the same bucket, table and `S3_PREFIX` variables).
+**17b. The HR portal**: the same, with `--function-name hr-onboarding-hr`, `--role .../hr-onboarding-hr-role`, `--image-config '{"Command":["python","-m","hr_onboarding.hr_portal"]}'`, log group `/aws/lambda/hr-onboarding-hr`, and these variables: `PORT=8001`, `SSM_PARAMETER_PREFIX=/hr-onboarding/hr/`, `SSM_PARAMETER_NAMES=HR_USERS,SESSION_SECRET`, `ONBOARDING_URL=https://<ONBOARDING_DOMAIN>` (and the same bucket, table and `S3_PREFIX` variables).
 
 Notes:
 - **`AWS_REGION`** is also set by Lambda itself; setting it is harmless. **`S3_KMS_KEY_ID` is not set** (the buckets use SSE-S3). **`SHARED_TABLE_PREFIX` is not set** (empty = the top-level `employees/` and `employee_education/` folders the live Athena tables expect).
@@ -759,8 +759,8 @@ Two CloudFront distributions, one per name, each with one small **CloudFront Fun
 **18b. One origin access control.** Console → CloudFront → **Origin access** → Create: name `hr-onboarding-lambda-oac`, **origin type Lambda**, signing **Sign requests** (SigV4).
 
 **18c. The two CloudFront Functions.** CloudFront → **Functions** → **Create function**, runtime **cloudfront-js-2.0**:
-- **`portal-night-page`**: paste `cloudfront/portal-viewer-request.js`. Publish.
-- **`hr-office-and-night`**: paste `cloudfront/hr-viewer-request.js`, **edit the `OFFICE_IPS` list at the top** to the office's address(es) (one IPv4 address, or a range like `203.0.113.0/24`). Publish.
+- **`portal-night-page`**: paste `deploy/cloudfront/portal-viewer-request.js`. Publish.
+- **`hr-office-and-night`**: paste `deploy/cloudfront/hr-viewer-request.js`, **edit the `OFFICE_IPS` list at the top** to the office's address(es) (one IPv4 address, or a range like `203.0.113.0/24`). Publish.
 - **What they do.** Both close the portal from **00:00 to 06:59 India time**: they answer by themselves with **HTTP 503**, a small inline HTML page ("The portal is available 7 am - 12 am IST") and `Cache-Control: no-store`, and the request never reaches Lambda. The time check works on India time directly (UTC+05:30, no daylight saving), so it does not depend on any server's clock setting. The HR Function **also** lets only the office addresses through (everyone else gets a plain **403**, even at night, so a stranger learns nothing). Neither Function touches cookies or login headers: the HR sign-in is a form and a signed cookie inside the app (`hr_login.py`).
 - Both files are tested (`tests/test_cloudfront_functions.py`, in a real JavaScript engine) at the boundaries 23:59 (open), 00:00 (closed), 06:59 (closed) and 07:00 (open).
 - To change the hours later, change `< 7` in `isClosed` in **both** files and the cron times in Step 19.
@@ -854,13 +854,13 @@ To skip a whole night properly you can also disable the two "off" schedules (Eve
 
 ### Step 20. Athena and Glue (SQL on the HR tables), then move the old data
 
-- **First ask your colleague** (Step 10j, question 4): do the Athena tables from `Data/sources_hr/athena_tables.sql` already exist on `igtl-hr-analytics-ayush-2026`? If **yes**, do not create them again: the new `employees/IGTPL###.parquet` and `employee_education/IGTPL###.parquet` files are picked up by their existing tables, and you only need permission to query them. Skip to the Test line. If **no**, create them yourself as below.
+- **First ask your colleague** (Step 10j, question 4): do the Athena tables from `samples/hr_tables/athena_tables.sql` already exist on `igtl-hr-analytics-ayush-2026`? If **yes**, do not create them again: the new `employees/IGTPL###.parquet` and `employee_education/IGTPL###.parquet` files are picked up by their existing tables, and you only need permission to query them. Skip to the Test line. If **no**, create them yourself as below.
 - Console → **Glue** → Databases → **Add database** `hr_analytics` (skip if it exists).
 - **Athena** → Workgroups → **Create** `hr-onboarding`: result location `s3://<BUCKET>/athena-results/` (your own bucket, not the shared one), tick "Override client-side settings", per-query data limit 10 GB.
-- In the query editor choose workgroup `hr-onboarding`, open `Data/sources_hr/athena_tables.sql`, replace `YOUR_BUCKET` with `igtl-hr-analytics-ayush-2026`, and run each `CREATE TABLE`. The tables point at the **top-level** folders `s3://igtl-hr-analytics-ayush-2026/employees/` and `.../employee_education/` (no `hr/` prefix). The **bank and sensitive tables must point at `s3://<BUCKET_RESTRICTED>/hr/...`** (your private bucket), not the shared one.
+- In the query editor choose workgroup `hr-onboarding`, open `samples/hr_tables/athena_tables.sql`, replace `YOUR_BUCKET` with `igtl-hr-analytics-ayush-2026`, and run each `CREATE TABLE`. The tables point at the **top-level** folders `s3://igtl-hr-analytics-ayush-2026/employees/` and `.../employee_education/` (no `hr/` prefix). The **bank and sensitive tables must point at `s3://<BUCKET_RESTRICTED>/hr/...`** (your private bucket), not the shared one.
 - Test: `SELECT employee_id, full_name, designation, employment_status FROM hr_analytics.employees WHERE employee_id LIKE 'IGTPL%';`
 - Optional **Lake Formation** (ask the administrator): grant SELECT on the two restricted tables only to the HR-admin role.
-- **Rebuild the tables from the records** at any time with `python sync_tables.py` (with `STORAGE_BACKEND=dynamodb_s3` and the `S3_*` and `DDB_*` variables set, from a computer that is signed in to AWS with permission to read the tables and write the table folders). It never deletes a file.
+- **Rebuild the tables from the records** at any time with `python scripts/sync_tables.py` (with `STORAGE_BACKEND=dynamodb_s3` and the `S3_*` and `DDB_*` variables set, from a computer that is signed in to AWS with permission to read the tables and write the table folders). It never deletes a file.
 - **Moving old data from MongoDB (only if there is an earlier MongoDB deployment; skip on a fresh start).** The one-time script `scripts/migrate_mongo_to_dynamodb.py` copies the old `applications` and `forms` into the DynamoDB tables and sets the ID counter to the highest `IGTPL` number so new IDs continue from it. **Read these rules first:**
   - It is a **dry run unless you add `--apply`**: it only reports what it would do. Run the dry run first and read it.
   - It is **safe to run again**: an item that already exists is never overwritten, and the counter only moves up.
@@ -871,7 +871,7 @@ To skip a whole night properly you can also disable the two "off" schedules (Eve
   python scripts/migrate_mongo_to_dynamodb.py --apply    # really copy
   ```
   After checking the new tables in the app, delete the old MongoDB cluster and any copy of its connection string (and see Part 7.2 about retention).
-- **Move data that was only ever on a laptop** (the old `submissions/`, `forms/` and `uploads/` folders): `python sync_tables.py --from-local` with the `dynamodb_s3` variables set copies each student's record and form into DynamoDB, their documents into `onboarding/employees/<id>/documents/`, and writes the table files. Then **delete the local `uploads/` and `submissions/` folders** and any zip of the project from CloudShell: they hold Aadhaar and PAN.
+- **Move data that was only ever on a laptop** (the old `submissions/`, `forms/` and `uploads/` folders): `python scripts/sync_tables.py --from-local` with the `dynamodb_s3` variables set copies each student's record and form into DynamoDB, their documents into `onboarding/employees/<id>/documents/`, and writes the table files. Then **delete the local `uploads/` and `submissions/` folders** and any zip of the project from CloudShell: they hold Aadhaar and PAN.
 - **Cost: Athena $5 per TB scanned (megabytes = cents); Glue free at this size.**
 
 ### Step 21. Lock down the two private buckets (documents and restricted)
@@ -1060,7 +1060,7 @@ Add this statement to the bucket policy of **both** `<BUCKET>` (documents) and `
 ### E. Data is missing in Athena or the HR portal
 
 - A failed table write is logged as `HR table sync failed` **but the submission is still saved in DynamoDB**. Look for `ERROR` in the portal log (most often AccessDenied on the shared bucket, problem C).
-- Run `python sync_tables.py` (Step 20) to rebuild all the tables from the records.
+- Run `python scripts/sync_tables.py` (Step 20) to rebuild all the tables from the records.
 - Employee missing in the **HR portal**: the portal reads DynamoDB, not Athena. Check the `hr-onboarding-applications` item for the ID. An item with `application_status = Draft` is an ID that was claimed but whose submit failed; it is hidden on purpose and removes itself after 7 days.
 - In Athena, make sure the workgroup is `hr-onboarding` and the database is `hr_analytics`. The wrong region in the console also shows empty tables.
 - Athena error "HIVE_..." or "schema mismatch": re-run the table's `CREATE TABLE` from `athena_tables.sql`.
@@ -1071,8 +1071,8 @@ Add this statement to the bucket policy of **both** `<BUCKET>` (documents) and `
 - **A file:** versioning is on, so nothing is really gone. Console → S3 → bucket → open the folder → toggle **Show versions**. A deleted file shows a "Delete marker". Select the **delete marker** and click **Delete** (the file returns). For an older version of a changed file, download it and upload it again.
 - CLI: `aws s3api list-object-versions --bucket <BUCKET> --prefix onboarding/employees/IGTPL007/` shows version IDs. Remove a delete marker with `aws s3api delete-object --bucket <BUCKET> --key <KEY> --version-id <DELETE_MARKER_ID>`.
 - Find who deleted it: CloudTrail data events (`DeleteObject`) or the Logs Insights query in Step 8. Versions older than 365 days are removed by the lifecycle rule, so recover quickly.
-- **A record changed or deleted in DynamoDB** (the function roles cannot delete, so this was an administrator or a mistake): use **point-in-time recovery**. Console → DynamoDB → the table → **Backups** → **Restore to point in time** → choose a time before the mistake → restore **into a new table** (for example `hr-onboarding-applications-restored`). Read the item there, and copy it back into the live table. Then run `python sync_tables.py` to rewrite the table files. Never restore over the live table without the administrator. PITR reaches back **35 days**.
-- **A file deleted in the shared bucket:** the app has no delete permission there, so this came from someone else. Ask your colleague to restore it from their bucket versions, or run `python sync_tables.py` to rewrite the student's files from the records.
+- **A record changed or deleted in DynamoDB** (the function roles cannot delete, so this was an administrator or a mistake): use **point-in-time recovery**. Console → DynamoDB → the table → **Backups** → **Restore to point in time** → choose a time before the mistake → restore **into a new table** (for example `hr-onboarding-applications-restored`). Read the item there, and copy it back into the live table. Then run `python scripts/sync_tables.py` to rewrite the table files. Never restore over the live table without the administrator. PITR reaches back **35 days**.
+- **A file deleted in the shared bucket:** the app has no delete permission there, so this came from someone else. Ask your colleague to restore it from their bucket versions, or run `python scripts/sync_tables.py` to rewrite the student's files from the records.
 
 ### G. I think data was seen or taken by the wrong person (possible breach)
 
@@ -1128,12 +1128,12 @@ Add this statement to the bucket policy of **both** `<BUCKET>` (documents) and `
   aws lambda update-function-code --function-name hr-onboarding-hr --image-uri <ECR_URI>:v1
   ```
   Wait for `LastUpdateStatus` to be `Successful` (`aws lambda get-function --function-name hr-onboarding-portal --query Configuration.LastUpdateStatus`), test the site and read the log.
-- **To release a new version:** build and push a new tag, update both functions to it, test. Do it outside working hours, and test locally first (`python react_onboard.py`).
+- **To release a new version:** build and push a new tag, update both functions to it, test. Do it outside working hours, and test locally first (`python -m hr_onboarding.employee_portal`).
 
 ### M. A function, a table or the image was deleted or broken
 
 - **A function:** create it again from the image (Step 17), re-add the permission for CloudFront (Step 18e). The Function URL changes: update the CloudFront origin. Nothing is stored in a function.
-- **A DynamoDB table:** deletion protection should have stopped it. If it is gone, **restore from the latest PITR/backup** into a table with the same name (Step 13 settings), then run `python sync_tables.py`.
+- **A DynamoDB table:** deletion protection should have stopped it. If it is gone, **restore from the latest PITR/backup** into a table with the same name (Step 13 settings), then run `python scripts/sync_tables.py`.
 - **The image:** rebuild and push it (Step 14).
 - Keep the Step 17 commands and the environment values in the company's secret store or runbook so this takes minutes.
 
@@ -1220,7 +1220,7 @@ Add this statement to the bucket policy of **both** `<BUCKET>` (documents) and `
 
 ### Z. A button gives 403 through CloudFront (the content-hash header), or the HR sign-in does not work
 
-- **POST, PUT and PATCH need `x-amz-content-sha256`.** With the origin access control, such a request must carry the **SHA-256 of its body** in the header **`x-amz-content-sha256`**, or Lambda rejects the signed request ("The request signature we calculated does not match"). The pages add this header themselves (`signedFetch` in `react_onboard.py`, `withBodyHash` in `hr_info.py`, and the sign-in form). If pages load (GET) but buttons and the sign-in fail with a 403:
+- **POST, PUT and PATCH need `x-amz-content-sha256`.** With the origin access control, such a request must carry the **SHA-256 of its body** in the header **`x-amz-content-sha256`**, or Lambda rejects the signed request ("The request signature we calculated does not match"). The pages add this header themselves (`signedFetch` in `employee_portal.py`, `withBodyHash` in `hr_portal.py`, and the sign-in form). If pages load (GET) but buttons and the sign-in fail with a 403:
   - A browser that does not support `crypto.subtle` (an old browser, or the page opened over plain `http`): it cannot compute the hash. Use a current browser over HTTPS.
   - A custom client or a script that posts directly: add the header yourself (Part 11A, step 3 shows the command).
 - **HR is asked to sign in again and again:** the cookie is not being kept. Check in the browser's developer tools (Application → Cookies): `hr_session` should exist with HttpOnly, Secure and SameSite=Strict. It is missing if the origin request policy of the HR distribution does not forward cookies (use **AllViewerExceptHostHeader**, Step 18d), if the address is opened over plain `http`, or if the browser blocks cookies for the site. After 8 hours the next click sends you to the form: that is intended.
@@ -1231,7 +1231,7 @@ Add this statement to the bucket policy of **both** `<BUCKET>` (documents) and `
 ### AA. A page is blank, a button does nothing, or the browser console says "Content Security Policy"
 
 - Open the browser console (F12). A line such as `Refused to load the script ... because it violates the following Content Security Policy directive` names what was blocked.
-- **Blank page and the console says a script was refused:** `static/dist` is missing or the page links point at the wrong place. `https://<DOMAIN>/assets/index.app.js` (employees) or `.../assets/hr.app.js` (HR) must open as JavaScript. If it is a 404, the image was built without the first stage (Step 14): rebuild.
+- **Blank page and the console says a script was refused:** `src/hr_onboarding/static/dist` is missing or the page links point at the wrong place. `https://<DOMAIN>/assets/index.app.js` (employees) or `.../assets/hr.app.js` (HR) must open as JavaScript. If it is a 404, the image was built without the first stage (Step 14): rebuild.
 - **`Refused to connect to https://...s3...`:** the upload went to an address the policy does not list. The policy names `https://<BUCKET>.s3.<REGION>.amazonaws.com`, built from `S3_DOCUMENTS_BUCKET` and `AWS_REGION`; the pre-signed link must be the same address. A link for `s3.amazonaws.com` or another region means the function's `AWS_REGION` is wrong.
 - **An HR document shows blank or "refused to display":** the link's address is not in the HR page's `img-src` / `frame-src` (same cause: `S3_DOCUMENTS_BUCKET`/`AWS_REGION`).
 - **A browser extension** can also be blocked; test in a private window.
@@ -1427,18 +1427,18 @@ When all eight are ticked, go back to Part 10 (the final checklist) and Part 11 
 - Day 4: Step 19 (night schedule and its test), Step 7 alarms, Part 7 (extra security, with the administrator), Part 10 (checklist), Part 11 (verify), then Step 21 (lock-down, tested on a throwaway bucket first), then the restore, night and alarm tests.
 - Before a client's real launch: the privacy items in Part 7.2 (notice, Aadhaar decision, retention, deletion process) with legal.
 
-## Part 13. About `main.tf` (Terraform)
+## Part 13. About Terraform
 
-- `main.tf` describes the **old ECS/MongoDB design** (ECS containers, a load balancer, a NAT gateway and a different layout with the tables under `hr/`). **It must not be applied**: it would create resources that this design does not use and that clash with the shared bucket and the existing `hr_analytics` Glue database. It is kept unchanged, with a warning at the top.
-- Terraform is **not used** for this deployment. If you later set up many clients, writing a Terraform or CloudFormation version of Steps 13 to 19 is the way to make each deployment repeatable. That is a new file, not this one.
+- Terraform is **not used** for this deployment. The old `main.tf` described the previous ECS/MongoDB design and was removed from the project (it is in the git history, commit `18bb9f3`); it must not be applied, because it would clash with the shared bucket and the existing `hr_analytics` Glue database.
+- If you later set up many clients, writing a Terraform or CloudFormation version of Steps 13 to 19 is the way to make each deployment repeatable. That is a new file.
 
 ---
 
 ## Appendix A. Containers elsewhere (Options B, C, D)
 
 - The same Docker image runs anywhere that runs containers: set `STORAGE_BACKEND=dynamodb_s3` plus the `S3_*` and `DDB_*` variables from Appendix C, and give the container an IAM role (ECS task role, EC2 instance profile). The Lambda Web Adapter is only active on Lambda.
-- **B (one EC2 server):** `docker-compose.aws.yml` and `Caddyfile` in the project start the two portals and Caddy for HTTPS. Their setup text is in `DEPLOY_AWS.md` (written for the older MongoDB variant: change the settings to the `dynamodb_s3` ones).
-- **C, D (ECS Fargate behind a load balancer):** not built here. The earlier steps for ECS, the load balancer, the NAT gateway and MongoDB Atlas are archived in `archive/AWS_SETUP_GUIDE_EC2_MongoDB.md` and `archive/DEPLOY_AWS_EC2_MongoDB.md` (they describe the previous design: use them as a starting point only).
+- **B (one EC2 server):** `docker-compose.yml` in the project starts the two portals; put Caddy or a load balancer in front for HTTPS and change the settings to the `dynamodb_s3` ones. The earlier Caddy and EC2 setup text was removed (git history, commit `18bb9f3`).
+- **C, D (ECS Fargate behind a load balancer):** not built here. The earlier ECS steps are in the git history (commit `18bb9f3`, folder `archive/`) and describe the previous design: use them as a starting point only.
 
 ## Appendix B. Sources used for the prices and facts
 

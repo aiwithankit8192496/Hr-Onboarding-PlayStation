@@ -16,14 +16,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import boto3
 from moto import mock_aws
 
-import hr_login
-import jsonlog
-import storage
+from hr_onboarding import hr_login
+from hr_onboarding import jsonlog
+from hr_onboarding import storage
 
 REGION = "ap-south-1"
 SHARED, DOCS, RESTRICTED = "igtl-hr-analytics-ayush-2026", "igtpl-hr-onboarding-docs-2026", "igtpl-hr-onboarding-restricted-2026"
@@ -426,9 +425,9 @@ class PortalTests(AwsTestCase):
         super().setUp()
         from starlette.testclient import TestClient
 
-        sys.modules.pop("react_onboard", None)
-        self.portal = importlib.import_module("react_onboard")
-        self.addCleanup(sys.modules.pop, "react_onboard", None)
+        sys.modules.pop("hr_onboarding.employee_portal", None)
+        self.portal = importlib.import_module("hr_onboarding.employee_portal")
+        self.addCleanup(sys.modules.pop, "hr_onboarding.employee_portal", None)
         self.client = TestClient(self.portal.app)
 
         # The policies step has its own tests elsewhere; here it is answered and signed
@@ -637,9 +636,9 @@ class HrPortalTests(AwsTestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-        sys.modules.pop("hr_info", None)
-        self.hr = importlib.import_module("hr_info")
-        self.addCleanup(sys.modules.pop, "hr_info", None)
+        sys.modules.pop("hr_onboarding.hr_portal", None)
+        self.hr = importlib.import_module("hr_onboarding.hr_portal")
+        self.addCleanup(sys.modules.pop, "hr_onboarding.hr_portal", None)
         # https, so the Secure cookie is kept by the test client like a browser would
         self.client = TestClient(self.hr.app, base_url="https://testserver", follow_redirects=False)
 
@@ -932,8 +931,8 @@ class HrPortalTests(AwsTestCase):
         # a second copy of the function: the module loaded again, a new client, nothing in memory
         from starlette.testclient import TestClient
 
-        sys.modules.pop("hr_info", None)
-        second = importlib.import_module("hr_info")
+        sys.modules.pop("hr_onboarding.hr_portal", None)
+        second = importlib.import_module("hr_onboarding.hr_portal")
         other = TestClient(second.app, base_url="https://testserver", follow_redirects=False)
         reply = other.post("/login", json={"user": "priya", "password": HR_PASSWORD, "code": self.next_code("priya")})
         self.assertEqual(reply.status_code, 429)

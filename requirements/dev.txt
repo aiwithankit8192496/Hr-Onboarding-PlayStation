@@ -1,4 +1,4 @@
-﻿-r requirements-aws.txt
+-r runtime.txt
 moto[s3,dynamodb,ssm]
 pytest
 pymongo  # only scripts/migrate_mongo_to_dynamodb.py and the deprecated mongo_s3 backend

@@ -1,20 +1,34 @@
 [project]
 name = "hr-onboarding"
 version = "0.1.0"
-description = "Employee onboarding portal with OCR-based document extraction"
+description = "Employee onboarding portal and HR review portal (AWS Lambda, DynamoDB, S3)"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
+# Mirrors requirements/runtime.txt (the Docker image installs from that file)
 dependencies = [
-    "numpy",
-    "opencv-python",
+    "starlette",
+    "uvicorn",
+    "python-multipart",
     "pillow",
-    "pytesseract",
-    "streamlit",
+    "pypdfium2",
+    "boto3",
+    "pyarrow",
 ]
 
-[project.scripts]
-hr-onboarding = "hr_onboarding:main"
+[project.optional-dependencies]
+dev = [
+    "moto[s3,dynamodb,ssm]",
+    "pytest",
+    "pymongo",
+    "qrcode",
+    "httpx",
+    "mini-racer",
+]
 
 [build-system]
 requires = ["uv_build>=0.13.6,<0.14.0"]
 build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

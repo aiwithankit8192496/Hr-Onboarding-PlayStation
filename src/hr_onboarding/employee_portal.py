@@ -5,7 +5,7 @@ Same features as app_2.py (AI document extraction, validation, JSON
 submissions), with the UI rewritten as React components.
 
 Run:
-    python react_onboard.py
+    python employee_portal.py
 Then open http://localhost:8000
 """
 
@@ -38,20 +38,20 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Route
 
-import Bank_details as bank
-import assets
-import jsonlog
-import policies
-import theme
-import storage
-from security_headers import SecurityHeaders
+from hr_onboarding import bank_details as bank
+from hr_onboarding import assets
+from hr_onboarding import jsonlog
+from hr_onboarding import policies
+from hr_onboarding import theme
+from hr_onboarding import storage
+from hr_onboarding.security_headers import SecurityHeaders
 
 
 # ==========================================================
 # 1. APPLICATION CONFIGURATION
 # ==========================================================
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[2]  # the project folder (.env and the local data folders live here)
 
 jsonlog.setup()  # JSON log lines with the level and the employee ID only, never personal details
 log = logging.getLogger("onboarding")
@@ -59,7 +59,7 @@ log = logging.getLogger("onboarding")
 # uploaded documents live in storage.py: local folders, or S3 with STORAGE_BACKEND=s3
 storage.check_config()  # refuse to start on an unsafe S3 setup (see storage.py)
 
-# Application statuses set here; HR sets Approved / Rejected / Pending in hr_info.py
+# Application statuses set here; HR sets Approved / Rejected / Pending in hr_portal.py
 STATUS_NEW = "New"
 STATUS_CHANGES = "Changes Requested"
 
@@ -1334,7 +1334,7 @@ async def submit(request: Request):
         record["access_token"] = secrets.token_urlsafe(16)
         record["flags"] = []
 
-    # Keep the uploaded documents, in this employee's own folder, so HR can review them in hr_info.py
+    # Keep the uploaded documents, in this employee's own folder, so HR can review them in hr_portal.py
     employee_id = record["employee_id"]
     jsonlog.set_employee(employee_id)
 
@@ -1623,14 +1623,9 @@ a { color: var(--brand); }
 .topbar-inner { max-width: 1240px; margin: 0 auto; padding: 12px 24px; display: flex; align-items: center; gap: 16px; }
 .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; letter-spacing: -0.01em; }
 .brand small { display: block; font-weight: 500; color: var(--muted); font-size: 12px; letter-spacing: 0; }
-.brand-mark {
-  width: 36px; height: 36px;
-  border-radius: 11px;
-  display: grid; place-items: center;
-  color: #fff;
-  background: var(--gradient);
-  box-shadow: 0 8px 16px -8px rgba(79, 70, 229, 0.7);
-}
+/* The company logo has a white background, so it always sits on a white rounded chip (clean in light and dark) */
+.brand-logo { display: block; height: 46px; width: auto; background: #fff; border-radius: 8px; padding: 3px 9px; box-sizing: border-box; box-shadow: 0 0 0 1px var(--line); }
+.brand-sep { width: 1px; height: 30px; background: var(--line); }
 .topbar-progress { margin-left: auto; display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--muted); }
 .topbar-progress strong { color: var(--ink); }
 .bar { width: 160px; height: 6px; background: var(--line); border-radius: 99px; overflow: hidden; }
@@ -2251,7 +2246,8 @@ pre {
   .topbar-inner, .hero-inner { padding-left: 16px; padding-right: 16px; }
   .hero-inner { padding-top: 32px; }
   .layout { padding: 0 16px 56px; }
-  .brand small, .topbar-progress .label-text { display: none; }
+  .brand small, .brand-sep, .topbar-progress .label-text { display: none; }
+  .brand-logo { height: 40px; }
   .bar { width: 80px; }
   .grid, .grid.three, .ref-grid, .review-grid { grid-template-columns: minmax(0, 1fr); }
   .review-block { padding: 16px 14px; }
@@ -2325,7 +2321,7 @@ const INITIAL_FORM = {
   declaration: false,
 };
 
-// Filled in by the server from react_onboard.LANGUAGES
+// Filled in by the server from employee_portal.LANGUAGES
 const LANGUAGES = __LANGUAGES__;
 
 // Form key -> the field name shown in error messages (from REQUIRED_FIELDS on the server)
@@ -2385,7 +2381,7 @@ const RESUME_FIELDS = {
 const CARD_RATIOS = [{ label: "ID card", value: 85.6 / 54 }, { label: "Free", value: NaN }];
 const PHOTO_RATIOS = [{ label: "Passport", value: 35 / 45 }, { label: "Square", value: 1 }, { label: "Free", value: NaN }];
 
-// Shown in the Personal Information section; keys match react_onboard.DOCUMENTS
+// Shown in the Personal Information section; keys match employee_portal.DOCUMENTS
 const IDENTITY_DOCUMENTS = [
   { key: "aadhaar_front", title: "Aadhaar Card", side: "Front", icon: "id", ratios: CARD_RATIOS },
   { key: "aadhaar_back", title: "Aadhaar Card", side: "Back", icon: "id", ratios: CARD_RATIOS },
@@ -2748,7 +2744,7 @@ async function postForm(url, body) {
   try {
     response = await signedFetch(url, { method: "POST", body });
   } catch {
-    throw new Error("Could not reach the server. Is react_onboard.py still running?");
+    throw new Error("Could not reach the server. Is employee_portal.py still running?");
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `Request failed (${response.status}).`);
@@ -4515,7 +4511,8 @@ function App() {
       <header className="topbar">
         <div className="topbar-inner">
           <div className="brand">
-            <span className="brand-mark"><Icon name="building" size={18} /></span>
+            <img className="brand-logo" src="/assets/vendor/intensity-logo-v1.png" width="139" height="46" alt="Intensity: You First. Great Place To Work Certified 2026, India" />
+            <span className="brand-sep" aria-hidden="true"></span>
             <span>Onboarding Portal<small>Build. Grow. Together.</small></span>
           </div>
           <div className="topbar-progress" aria-label={`${percent}% complete`}>
@@ -4845,7 +4842,7 @@ function App() {
             </Section>
             </div>
 
-            {/* Step 2: Bank details (Bank_details.py) */}
+            {/* Step 2: Bank details (bank_details.py) */}
             <div className="step-panel" hidden={step !== 1}>
             <Section id="bank" done={completion.bank}>
               <BankDetails form={form} update={update} files={files} setFile={setFile} />
